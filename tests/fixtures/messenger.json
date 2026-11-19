@@ -1,0 +1,11 @@
+{
+  "object": "page",
+  "entry": [{
+    "id": "100",
+    "messaging": [{
+      "sender": { "id": "200" },
+      "recipient": { "id": "100" },
+      "message": { "mid": "synthetic-inbound-message", "text": "Đây là tin nhắn thử nghiệm." }
+    }]
+  }]
+}
