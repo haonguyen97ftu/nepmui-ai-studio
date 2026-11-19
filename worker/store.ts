@@ -2,6 +2,7 @@ import { and, desc, eq, sql } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/d1'
 import { brands, records, revisions } from './schema'
 import { settings, type Data, type Entry, type Kind } from './contracts'
+import { matchExpression, retrievalExpression } from './retrieval'
 
 export function studio(binding: D1Database, brand: string) {
   const db = drizzle(binding)
@@ -32,7 +33,10 @@ export function studio(binding: D1Database, brand: string) {
       return (await get(kind, 'config'))?.data ?? settings[kind] as Data<K>
     },
     async list<K extends Kind>(kind: K, search = '', offset = 0, status?: string, mode?: 'test' | 'live') {
-      const match = search ? sql`instr(lower(${records.data}), lower(${search})) > 0` : undefined
+      const terms = matchExpression(search)
+      const match = search && kind === 'knowledge'
+        ? terms ? sql`${records.id} IN (SELECT record_id FROM studio_search WHERE studio_search MATCH ${terms} AND brand_id=${brand} AND kind='knowledge')` : sql`0`
+        : search ? sql`instr(lower(${records.data}), lower(${search})) > 0` : undefined
       return (await db.select().from(records).where(and(scope(kind), match, status ? sql`json_extract(${records.data}, '$.status') = ${status}` : undefined, channelScope(mode)))
         .orderBy(desc(records.updated), records.id).limit(51).offset(offset)).map(decode<K>)
     },
@@ -75,9 +79,27 @@ export function studio(binding: D1Database, brand: string) {
       ).bind(brand, day, estimate, callLimit, estimate, neuronLimit, callLimit, neuronLimit).run()
       return result.meta.changes === 1
     },
-    candidates: () => binding.prepare(
-      "SELECT id, json_extract(data,'$.title') title, json_extract(data,'$.body') body FROM records WHERE brand_id=? AND kind='knowledge' AND json_extract(data,'$.status')='published' ORDER BY updated DESC LIMIT 200",
-    ).bind(brand).all<{ id: string; title: string; body: string }>(),
+    async retrieve<K extends 'products' | 'knowledge'>(kind: K, query: string, browse = false) {
+      const terms = retrievalExpression(query)
+      const conditions = kind === 'knowledge'
+        ? "AND json_extract(r.data,'$.status')='published'" : browse ? "AND json_extract(r.data,'$.availability')='available'" : ''
+      if (!terms && !browse) return []
+      const match = binding.prepare(`SELECT r.* FROM studio_search s JOIN records r
+        ON r.brand_id=s.brand_id AND r.kind=s.kind AND r.id=s.record_id
+        WHERE studio_search MATCH ? AND r.brand_id=? AND r.kind=? ${conditions}
+        ORDER BY bm25(studio_search,0,0,0,8,1), r.id LIMIT 8`).bind(terms, brand, kind)
+      const fallback = binding.prepare(`SELECT r.* FROM records r WHERE r.brand_id=? AND r.kind=? ${conditions}
+        ORDER BY r.updated DESC, r.id LIMIT 8`).bind(brand, kind)
+      const matched = terms ? (await match.all<{ id: string; data: string; version: number; updated: number }>()).results : []
+      const rows = matched.length || !browse ? matched : (await fallback.all<typeof matched[number]>()).results
+      return rows.map(row => ({ id: row.id, data: JSON.parse(row.data) as Data<K>, version: row.version, updated: row.updated }))
+    },
+    history: (id: string) => db.select().from(revisions).where(and(eq(revisions.brand, brand),
+      eq(revisions.kind, 'knowledge'), eq(revisions.recordId,id))).orderBy(desc(revisions.at), revisions.id).limit(100),
+    async snapshot(id: string, revision: string) {
+      return db.select().from(revisions).where(and(eq(revisions.brand, brand), eq(revisions.kind, 'knowledge'),
+        eq(revisions.recordId,id), eq(revisions.id,revision))).get()
+    },
     async overview(day: string, since: number, mode: 'test' | 'live') {
       const [counts, metrics, daily, spend] = await binding.batch<Record<string, number>>([
         binding.prepare(`SELECT count(*) total,

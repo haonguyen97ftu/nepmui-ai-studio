@@ -24,7 +24,7 @@ const groups = [
   { title: 'NỘI DUNG & AI', items: [['knowledge', BookOpen], ['products', Package], ['persona', UserRound], ['training', Sparkles], ['playground', FlaskConical]] },
   { title: 'HỆ THỐNG', items: [['integrations', Plug], ['models', Layers3], ['settings', Settings2]] },
 ] as const
-type Session = { authenticated: boolean; demo: boolean; brand?: { name: string } }
+type Session = { authenticated: boolean; demo: boolean; staging?: boolean; brand?: { name: string } }
 function route() {
   const [segment, ...rest] = window.location.hash.slice(1).split('/')
   const page = Object.hasOwn(navigation, segment) ? segment as Page : 'dashboard'
@@ -56,7 +56,6 @@ function App() {
   const session = useResource<Session>('session')
   const [{ page, id }, setRoute] = useState(route)
   const [mobileNav, setMobileNav] = useState(false)
-  const [correction, setCorrection] = useState<{ title: string; incorrect: string }>()
   const [brandName, setBrandName] = useState<string>()
   const logout = useAction()
   useEffect(() => {
@@ -64,7 +63,6 @@ function App() {
       const next = route()
       setRoute(next)
       setMobileNav(false)
-      if (next.page !== 'training') setCorrection(undefined)
       window.scrollTo(0, 0)
     }
     window.addEventListener('hashchange', navigate)
@@ -84,12 +82,12 @@ function App() {
   const name = brandName ?? brand.name
   const pages = {
     dashboard: <Dashboard demo={demo} />,
-    knowledge: <Library key="knowledge" kind="knowledge" />,
-    products: <Library key="products" kind="products" />,
-    training: <Library key="training" kind="training" correction={correction} />,
+    knowledge: <Library key={"knowledge" + (id ?? "")} kind="knowledge" selectedId={id} />,
+    products: <Library key={"products" + (id ?? "")} kind="products" selectedId={id} />,
+    training: <Library key={"training" + (id ?? "")} kind="training" selectedId={id} />,
     persona: <Persona />,
     playground: <Playground />,
-    conversations: <Conversations selectedId={id} correct={(title, incorrect) => { setCorrection({ title, incorrect }); window.location.hash = 'training' }} />,
+    conversations: <Conversations selectedId={id} correct={id => { window.location.hash = 'training/' + encodeURIComponent(id) }} />,
     integrations: <Integrations />,
     models: <Models />,
     settings: <Settings name={name} demo={demo} refresh={() => {
@@ -116,7 +114,7 @@ function App() {
           <Button variant="ghost" className="menu-toggle" aria-label="Mở menu" aria-expanded={mobileNav} aria-controls="studio-navigation" onClick={() => setMobileNav(value => !value)}><Menu size={21} /></Button>
           <span className="breadcrumb-studio">AI Studio</span><ChevronRight className="breadcrumb-chevron" size={14} /><strong>{navigation[page][0]}</strong>
         </div>
-        <div className="topbar-right"><span className="environment"><span className="status-dot" /> {demo ? 'Chế độ mô phỏng' : name}</span>
+        <div className="topbar-right"><span className="environment"><span className="status-dot" /> {demo ? 'Chế độ mô phỏng' : session.value.staging ? 'Staging' : name}</span>
           <a href="#settings" className="help-link" aria-label="Cài đặt truy cập"><CircleHelp size={19} /></a></div>
       </header>
       <main className="content" id="main-content" tabIndex={-1}>

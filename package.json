@@ -17,7 +17,10 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "build:staging": "cf build --mode staging",
+    "deploy:staging": "node scripts/deploy-staging.mjs",
+    "benchmark:staging": "node scripts/benchmark-staging.mjs"
   },
   "dependencies": {
     "@fontsource/be-vietnam-pro": "^5.3.0",

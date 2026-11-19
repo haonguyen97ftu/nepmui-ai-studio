@@ -1,13 +1,14 @@
 import { z } from 'zod'
 import type { Data } from './contracts'
 
-export type Inbound = { id: string; sender: string; text: string }
+export type Inbound = { id: string; sender: string; text: string; timestamp?: number }
 export interface ChannelAdapter {
   channel: Data<'conversations'>['channel']
   decode(payload: unknown, pageId: string): Inbound[]
 }
 
 const eventSchema = z.object({
+  timestamp: z.number().int().positive().optional(),
   sender: z.object({ id: z.string().regex(/^\d{1,32}$/) }),
   recipient: z.object({ id: z.string().regex(/^\d{1,32}$/) }),
   message: z.object({ mid: z.string().min(1).max(256), text: z.string().trim().min(1).max(1000), is_echo: z.boolean().optional() }),
@@ -23,7 +24,7 @@ export const messenger: ChannelAdapter = {
     return data.entry.filter(entry => entry.id === pageId).flatMap(entry => (entry.messaging ?? []).flatMap(value => {
       const event = eventSchema.safeParse(value)
       if (!event.success || event.data.message.is_echo || event.data.recipient.id !== pageId) return []
-      return [{ id: event.data.message.mid, sender: event.data.sender.id, text: event.data.message.text }]
+      return [{ id: event.data.message.mid, sender: event.data.sender.id, text: event.data.message.text, timestamp: event.data.timestamp }]
     }))
   },
 }
@@ -49,22 +50,51 @@ export async function signatureValid(secret: string, bytes: Uint8Array<ArrayBuff
   return crypto.subtle.verify('HMAC', key, expected, bytes)
 }
 
-export async function receive(db: D1Database, brand: string, channel: ChannelAdapter['channel'], item: Inbound) {
-  const at = Date.now()
-  const thread = `${channel}:${item.sender}`
-  const message = JSON.stringify({ role: 'user', text: item.text })
-  const results = await db.batch([
-    db.prepare('INSERT INTO deliveries VALUES (?,?,?,?) ON CONFLICT DO NOTHING').bind(brand, channel, item.id, at),
-    db.prepare(`INSERT INTO records (brand_id,kind,id,data,updated)
-      SELECT ?, 'conversations', ?, json_object('title',?,'channel',?,'status','handover','messages',json_array(json(?))), ?
-      WHERE changes()=1
-      ON CONFLICT (brand_id,kind,id) DO UPDATE SET
-      updated=excluded.updated, version=version+1,
+export async function receiveBatch(db: D1Database, brand: string, channel: ChannelAdapter['channel'], events: Inbound[], queue: boolean) {
+  if (!events.length) return 0
+  const now = Date.now()
+  const batch = crypto.randomUUID()
+  const firstById = new Map<string, Inbound>()
+  for (const event of events) if (!firstById.has(event.id)) firstById.set(event.id, event)
+  const input = JSON.stringify([...firstById.values()].map(({ id, sender, text, timestamp }) => ({
+    id, sender, text, thread: channel + ':' + sender, received: timestamp ?? (channel === 'messenger-mock' ? now : 0),
+  })))
+  const accepted = `SELECT CAST(event.key AS INTEGER) seq, event.value payload, d.thread_id
+    FROM json_each(?) event JOIN deliveries d ON d.brand_id=? AND d.channel=?
+      AND d.external_id=json_extract(event.value,'$.id') AND d.batch_key=?`
+  const batchArgs = [input, brand, channel, batch]
+  const work = [
+    db.prepare(`INSERT INTO deliveries (brand_id,channel,external_id,at,thread_id,batch_key)
+      SELECT ?,?,json_extract(value,'$.id'),?,json_extract(value,'$.thread'),? FROM json_each(?) WHERE 1
+      ON CONFLICT DO NOTHING RETURNING external_id`).bind(brand, channel, now, batch, input),
+    db.prepare(`WITH accepted AS (${accepted}),
+      ordered AS (
+        SELECT *,row_number() OVER (PARTITION BY thread_id ORDER BY seq DESC) position FROM accepted
+      ), grouped AS (
+        SELECT thread_id,json_group_array(json_object('role','user','text',json_extract(payload,'$.text'),
+          'outboundId',json_extract(payload,'$.id')) ORDER BY seq) messages FROM ordered WHERE position<=40 GROUP BY thread_id
+      )
+      INSERT INTO records (brand_id,kind,id,data,updated)
+      SELECT ?, 'conversations', thread_id,
+        json_object('title',substr(json_extract(messages,'$[0].text'),1,160),'channel',?,'status','handover','messages',json(messages)), ?
+      FROM grouped WHERE 1
+      ON CONFLICT (brand_id,kind,id) DO UPDATE SET updated=excluded.updated,version=version+1,
       data=json_set(records.data,'$.status','handover','$.messages',
-        json_insert(CASE WHEN json_array_length(records.data,'$.messages')>=40
-          THEN json_remove(json_extract(records.data,'$.messages'),'$[0]')
-          ELSE json_extract(records.data,'$.messages') END,'$[#]',json(?)))`)
-      .bind(brand, thread, item.text.slice(0, 160), channel, message, at, message),
-  ])
-  return results[0].meta.changes === 1
+        json((SELECT json_group_array(json(value) ORDER BY position) FROM (
+          SELECT * FROM (
+            SELECT CAST(key AS INTEGER) position,value FROM json_each(records.data,'$.messages')
+            UNION ALL
+            SELECT 40+CAST(key AS INTEGER),value FROM json_each(excluded.data,'$.messages')
+          ) ORDER BY position DESC LIMIT 40
+        ))))`).bind(...batchArgs, brand, channel, now),
+  ]
+  if (queue) work.push(db.prepare(`WITH accepted AS (${accepted})
+    INSERT INTO messenger_outbox (brand_id,channel,external_id,thread_id,recipient,question,received,due)
+    SELECT ?,?,json_extract(payload,'$.id'),thread_id,json_extract(payload,'$.sender'),json_extract(payload,'$.text'),
+      json_extract(payload,'$.received'),? FROM accepted a WHERE EXISTS (
+        SELECT 1 FROM records r,json_each(r.data,'$.messages') message
+        WHERE r.brand_id=? AND r.kind='conversations' AND r.id=a.thread_id
+          AND json_extract(message.value,'$.outboundId')=json_extract(a.payload,'$.id')
+      ) ON CONFLICT DO NOTHING`).bind(...batchArgs, brand, channel, now, brand))
+  return (await db.batch(work))[0].results.length
 }

@@ -18,6 +18,8 @@ export const label: Record<string, string> = {
   playground: 'Phòng thử nghiệm', 'messenger-mock': 'Messenger mô phỏng', messenger: 'Messenger',
   grounded: 'Có nguồn xác thực', no_source: 'Thiếu nguồn phù hợp', no_selection: 'Mô hình không chọn nguồn',
   provider_unavailable: 'Mô hình chưa sẵn sàng', provider_error: 'Lỗi mô hình', sensitive: 'Câu hỏi nhạy cảm', limit_reached: 'Đạt giới hạn hằng ngày',
+  queued: 'Đang chờ gửi', retry: 'Đang chờ thử lại', working: 'Đang soạn phản hồi', sending: 'Đang gửi',
+  sent: 'Đã gửi', expired: 'Hết cửa sổ nhắn tin', paused: 'Đã tạm dừng', failed: 'Gửi thất bại',
   create: 'Tạo mới', update: 'Cập nhật', delete: 'Xóa', brand: 'Thương hiệu',
 }
 export const number = new Intl.NumberFormat('vi-VN')

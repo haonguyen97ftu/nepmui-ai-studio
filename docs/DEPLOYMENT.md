@@ -1,25 +1,40 @@
-# Cloud deployment
+# Authenticated staging on Cloudflare Workers Free
 
-CI runs on GitHub Actions and publishes test and screenshot artifacts. Production is a manual release from an approved cloud shell. The repository contains no production deployment workflow.
+The staging Worker is `nepmui-ai-studio-staging`. It uses a separately provisioned D1 database from `STUDIO_STAGING_D1_ID`, an existing `workers.dev` subdomain, and its own administrator key. The login page is publicly reachable. Every admin data endpoint requires a valid session. The staging configuration and runtime both reject live Messenger ingress and delivery. Use synthetic data only.
 
-## Verify and provision after founder approval
+## Provision and deploy
 
-1. Use a Cloudflare Workers Free account and its existing `workers.dev` subdomain. Use an authenticated cloud workspace shell with Node.js 24 and the reviewed release checked out. Do not enable Workers Paid or AI Gateway billing.
-2. Run `npm ci` and reproduce GitHub CI checks. Sign in using `npx cf auth login` or use a short-lived least-privilege token from a cloud secret store. Do not place it in the repo or command history.
-3. Create the D1 database and export the returned UUID in the shell. Apply the migration to that database.
+Use the approved Cloudflare account on the Workers Free plan and a private cloud shell with Node.js 24. Leave Workers Paid and AI Gateway billing disabled. Run the following from the reviewed feature branch.
 
-   ```bash
-   npx cf d1 create --name nepmui-ai-studio
-   export STUDIO_D1_ID='<database-uuid>'
-   npx cf d1 migrations list "$STUDIO_D1_ID"
-   npx cf d1 migrations apply "$STUDIO_D1_ID"
-   ```
+```bash
+npm ci
+npx cf auth login
+npx cf auth whoami
+npx cf d1 create --name nepmui-ai-studio-staging
+export STUDIO_STAGING_D1_ID='<UUID printed for nepmui-ai-studio-staging>'
+npx cf d1 migrations list "$STUDIO_STAGING_D1_ID" --mode staging
+npx cf d1 migrations apply "$STUDIO_STAGING_D1_ID" --mode staging
+npm run build:staging
+```
 
-4. Generate an unpredictable administrator key with at least 32 random bytes, save it in the team's password manager, and provision it as the `ADMIN_SECRET` Worker secret. For the initial authenticated release use `cf deploy --no-provision --secrets-file <restricted-secret-file>` after preparing a protected, ignored JSON or dotenv file with only `ADMIN_SECRET`. Remove the file after use. Set the binding ID to the real database UUID. The default in the template is a dummy UUID for offline builds.
-5. Verify the dashboard URL prompts for an administrator key and protected endpoints return 401 without a valid session. Verify the brand, migration, empty real records, and mock playground. Keep `STUDIO_WORKERS_AI_ENABLED` and `STUDIO_MESSENGER_INGEST` unset at launch.
-6. Enable Workers AI only if approved, by deploying with `STUDIO_WORKERS_AI_ENABLED=true`, choosing a model, and setting UTC request and estimated Neuron limits in the UI. The app cap is at most 8,000 estimated Neurons/day. The Cloudflare Free account-wide cap is authoritative. Monitor account-level usage before expanding.
-7. Treat Messenger ingress as a separate approval. Add `META_APP_SECRET`, `META_VERIFY_TOKEN`, and `META_PAGE_ID` as Worker secrets, redeploy with `STUDIO_MESSENGER_INGEST=true`, and validate signed events on a test page. The route is `/api/webhooks/messenger`. A separate outbound adapter and approval would be needed for live messages.
+In the private shell, create the staging secret file outside the repository. This generates a 32-byte random key, restricts the file to the current user, and avoids displaying it in terminal output.
 
-Before applying later migrations, use D1 Time Travel or export a backup. For an application rollback, redeploy the previous reviewed Worker version if it supports the updated schema. Revert a schema change with a forward migration after evaluating recovery.
+```bash
+umask 077
+export STUDIO_STAGING_SECRETS_FILE="$(mktemp /tmp/nepmui-staging.XXXXXX.json)"
+node -e 'const fs=require("node:fs");const crypto=require("node:crypto");fs.writeFileSync(process.env.STUDIO_STAGING_SECRETS_FILE,JSON.stringify({ADMIN_SECRET:crypto.randomBytes(32).toString("hex")}))'
+```
 
-[Cloudflare CLI for agents](https://developers.cloudflare.com/cf/agents/) · [D1 limits](https://developers.cloudflare.com/d1/platform/limits/) · [Workers pricing](https://developers.cloudflare.com/workers/platform/pricing/) · [Workers AI pricing](https://developers.cloudflare.com/workers-ai/platform/pricing/)
+Transfer the key into the approved password manager without displaying it in a shared terminal. Then run `npm run deploy:staging` and securely remove the temporary file after successful deployment. The command pins staging mode, checks the database ID and secret file, and disables resource provisioning. GitHub Actions builds and tests both modes, with deployment outside the workflow. Production remains a separate approval and release.
+
+## Verify staging
+
+1. Confirm a signed-out request to `/api/knowledge` returns 401. Sign in via the browser and open the Playground, product catalog and knowledge history.
+2. Confirm `/api/integrations` returns both flags false while signed in. Submit the mock using a question from synthetic published knowledge or a synthetic catalog item. Repeat the event ID and confirm no duplicate reply. Confirm the live webhook returns 403.
+3. In **Mô hình AI**, choose Workers AI and the allowlisted JSON-mode Llama model. Set daily UTC limits such as 20 calls and 4,000 estimated Neurons for the evaluation, subject to account headroom. Spending controls use an atomic pre-inference reservation, plus Cloudflare’s authoritative 10,000-Neuron account-wide Free limit. Other Workers may share that allocation.
+4. Run the synthetic Vietnamese benchmark from a private shell, providing `STUDIO_BENCHMARK_URL` and `STUDIO_BENCHMARK_ADMIN_SECRET` through the approved secret store. Run `npm run benchmark:staging`. The script verifies staging, seeds synthetic fixtures in the admin API, scores the result reason, generation method and facts, and deletes fixtures and threads after the run. Synthetic version history is retained. A Vietnamese reviewer should also assess tone, relevance and naturalness in the Playground. Record the model, limits and measured results in the QA report.
+5. Confirm the deployed Worker has the daily retention cron. Test manual deletion and retention using synthetic conversations only.
+
+Cloudflare authentication was unavailable in the implementation workspace. The staging build and configuration are checked in. Remote D1 provisioning, genuine Workers AI inference and the benchmark against it remain pending.
+
+[Cloudflare programmatic configuration](https://developers.cloudflare.com/cf/projects/cloudflare-config/) · [Cloudflare CLI authentication](https://developers.cloudflare.com/cf/agents/) · [Cron Triggers](https://developers.cloudflare.com/workers/configuration/cron-triggers/) · [Workers AI JSON Mode](https://developers.cloudflare.com/workers-ai/features/json-mode/) · [Workers AI Free limits](https://developers.cloudflare.com/workers-ai/platform/pricing/)

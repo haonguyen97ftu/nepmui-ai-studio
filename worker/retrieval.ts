@@ -1,0 +1,5 @@
+export const normalize = (value: string) => value.toLowerCase().normalize('NFD').replace(/\p{M}/gu, '').replace(/đ/g, 'd')
+const stop = new Set('cho toi minh ban la co khong nao mot nhung cua bao nhieu the nhu ve hay voi duoc va gi nay khi when what how about does have the you your tell please shop nen mui dam thu muon'.split(' '))
+export const tokens = (value: string) => [...new Set(normalize(value).match(/[a-z\d]{2,}/g) ?? [])].filter(word => !stop.has(word))
+export const matchExpression = (value: string) => (normalize(value).match(/[a-z\d]+/g) ?? []).slice(0, 16).map(term => `"${term}"`).join(' AND ')
+export const retrievalExpression = (value: string) => tokens(value).slice(0, 24).map(term => `"${term}"`).join(' OR ')

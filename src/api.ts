@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 
 const errors: Record<string, string> = {
+  login_limit: 'Quá nhiều lần thử. Vui lòng đợi 10 phút.',
   unauthorized: 'Phiên đăng nhập đã hết hạn hoặc khóa truy cập không đúng.',
   invalid_input: 'Dữ liệu chưa hợp lệ. Kiểm tra các trường và thử lại.',
   invalid_transition: 'Hãy lưu bản nháp, duyệt rồi xuất bản.',
@@ -29,6 +30,7 @@ export function useResource<T>(path: string) {
   const refresh = useCallback(() => setRevision(value => value + 1), [])
   const key = path + '|' + revision
   useEffect(() => {
+    if (!path) return
     let active = true
     api<T>(path).then(
       value => { if (active) setState({ key, value }) },

@@ -1,9 +1,10 @@
-import { useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { BookOpen, Check, Download, Package, Pencil, Plus, Search, Trash2, Upload, X } from 'lucide-react'
 import Papa from 'papaparse'
 import type { Data, Entry } from '../worker/contracts'
 import { api, useAction, useResource } from './api'
 import { date, number } from './locale'
+import { SourceLinks } from './sources'
 import { Button } from './ui/button'
 import { Badge, Empty, Feedback, LoadState, PageTitle } from './ui/common'
 
@@ -43,10 +44,10 @@ async function importFile(file: File) {
   return [{ title: file.name.replace(/\.[^.]+$/, '').slice(0, 160), category: 'Nhập từ tệp', body: content }]
 }
 
-export function Library({ kind, correction }: { kind: LibraryKind; correction?: { title: string; incorrect: string } }) {
+export function Library({ kind, selectedId }: { kind: LibraryKind; selectedId?: string }) {
   const copy = words[kind]
-  const [editing, setEditing] = useState<Item | 'new' | null>(correction ? 'new' : null)
-  const [fields, setFields] = useState<Draft>(correction ? { ...blank, ...correction } : blank)
+  const [editing, setEditing] = useState<Item | 'new' | null>(null)
+  const [fields, setFields] = useState<Draft>(blank)
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(0)
   const [confirm, setConfirm] = useState('')
@@ -54,6 +55,22 @@ export function Library({ kind, correction }: { kind: LibraryKind; correction?: 
   const [importOpen, setImportOpen] = useState(false)
   const list = useResource<{ items: Item[]; more: boolean }>(kind + '?q=' + encodeURIComponent(search) + '&page=' + page)
   const action = useAction()
+  const detail = useResource<Item>(selectedId ? kind + '/' + encodeURIComponent(selectedId) : '')
+  const [historyItem, setHistoryItem] = useState<Item>()
+  const historyPanel = useRef<HTMLElement>(null)
+  const history = useResource<{ id: string; at: number; data: string; action: string }[]>(historyItem ? 'knowledge/' + historyItem.id + '/history' : '')
+  useEffect(() => {
+    if (detail.value) {
+      setEditing(detail.value)
+      setFields(fieldsFor(detail.value))
+    }
+  }, [detail.value])
+  useEffect(() => {
+    if (historyItem) {
+      historyPanel.current?.focus({ preventScroll: true })
+      historyPanel.current?.scrollIntoView({ block: 'nearest' })
+    }
+  }, [historyItem])
   const set = (name: keyof Draft, value: string) => setFields(old => ({ ...old, [name]: value }))
   function edit(item?: Item) {
     setEditing(item ?? 'new')
@@ -61,7 +78,9 @@ export function Library({ kind, correction }: { kind: LibraryKind; correction?: 
   }
   function save(event: FormEvent) {
     event.preventDefault()
-    const data = payload(kind, fields)
+    const base = payload(kind, fields)
+    const sources = editing && editing !== 'new' && 'sources' in editing.data ? editing.data.sources : undefined
+    const data = kind === 'training' ? { ...base, sources } : base
     void action.run(async () => {
       if (editing && editing !== 'new') await api(`${kind}/${editing.id}`, 'PUT', { version: editing.version, data })
       else await api(kind, 'POST', data)
@@ -82,7 +101,22 @@ export function Library({ kind, correction }: { kind: LibraryKind; correction?: 
         {kind === 'knowledge' && <Button variant="outline" onClick={() => setImportOpen(value => !value)}><Upload size={16} /> Nhập tệp</Button>}
         <Button onClick={() => edit()}><Plus size={17} /> Thêm {copy.singular}</Button>
       </div>} />
-    <Feedback error={action.error} notice={action.notice} />
+    <Feedback error={action.error ?? detail.error} notice={action.notice} />
+    {historyItem && <section className="card padded form-stack" aria-label="Lịch sử phiên bản" ref={historyPanel} tabIndex={-1}>
+      <div className="card-heading"><div><h2>Lịch sử phiên bản</h2><p>{historyItem.data.title}</p></div>
+        <Button variant="ghost" onClick={() => setHistoryItem(undefined)}>Đóng lịch sử</Button></div>
+      {!history.value ? <LoadState error={history.error} retry={history.refresh} /> : history.value.map(revision => {
+        const snapshot = JSON.parse(revision.data) as Data<'knowledge'>
+        return <details key={revision.id}><summary>{date.format(revision.at)} · {snapshot.title} · {snapshot.status}</summary>
+          <p>{snapshot.body}</p><Button variant="outline" disabled={action.busy} onClick={() => void action.run(async () => {
+            const restored = await api<Item>('knowledge/' + historyItem.id + '/restore', 'POST', { revision: revision.id, version: historyItem.version })
+            setHistoryItem(undefined)
+            edit(restored)
+            list.refresh()
+          }, 'Đã khôi phục thành bản nháp.')}>Khôi phục thành bản nháp</Button>
+        </details>
+      })}
+    </section>}
     {importOpen && <form className="card padded form-stack" onSubmit={event => {
       event.preventDefault()
       if (file) void action.run(async () => {
@@ -108,7 +142,7 @@ export function Library({ kind, correction }: { kind: LibraryKind; correction?: 
       {kind === 'knowledge' && <label>Danh mục<input required maxLength={160} value={fields.category} onChange={event => set('category', event.target.value)} /></label>}
       {kind === 'training' && <label>Phản hồi cần sửa<textarea maxLength={4000} value={fields.incorrect} onChange={event => set('incorrect', event.target.value)} /></label>}
       {kind !== 'products' && <label>{kind === 'training' ? 'Phản hồi đã sửa' : 'Nội dung'}
-        <textarea required maxLength={4000} rows={5} value={fields.body} onChange={event => set('body', event.target.value)} /></label>}
+        <textarea required={kind === 'knowledge'} maxLength={4000} rows={5} value={fields.body} onChange={event => set('body', event.target.value)} /></label>}
       {kind === 'products' && <>
         <label>Tầng hương<textarea maxLength={4000} value={fields.notes} onChange={event => set('notes', event.target.value)} /></label>
         <div className="field-grid"><label>Giá (VND)<input required type="number" min="0" max="1000000000" value={fields.price} onChange={event => set('price', event.target.value)} /></label>
@@ -116,6 +150,7 @@ export function Library({ kind, correction }: { kind: LibraryKind; correction?: 
             <option value="unknown">Chưa xác nhận</option><option value="available">Còn hàng</option><option value="unavailable">Hết hàng</option></select></label></div>
         <label>URL ảnh (HTTPS)<input type="url" maxLength={1000} value={fields.image} onChange={event => set('image', event.target.value)} placeholder="https://" /></label>
       </>}
+      {editing !== 'new' && 'sources' in editing.data && <SourceLinks sources={editing.data.sources} />}
       <div className="actions"><Button type="submit" disabled={action.busy}>{kind === 'products' ? 'Lưu sản phẩm' : 'Lưu bản nháp'}</Button>
         <Button variant="ghost" onClick={() => setEditing(null)}>Hủy</Button></div>
     </form>}
@@ -139,10 +174,12 @@ export function Library({ kind, correction }: { kind: LibraryKind; correction?: 
                 {'status' in data && data.status !== 'published' &&
                   <Button variant="outline" disabled={action.busy} onClick={() => transition(item, data.status === 'draft' ? 'approved' : 'published')}>
                     <Check size={15} /> {data.status === 'draft' ? 'Duyệt' : 'Xuất bản'}</Button>}
+                {kind === 'knowledge' && <Button variant="ghost" aria-label={`Lịch sử ${data.title}`} onClick={() => setHistoryItem(item)}>Lịch sử</Button>}
                 <Button variant="ghost" aria-label={`Sửa ${data.title}`} onClick={() => edit(item)}><Pencil size={16} /></Button>
                 <Button variant="ghost" aria-label={`Xóa ${data.title}`} onClick={() => setConfirm(item.id)}><Trash2 size={16} /></Button>
               </div>
             </div>
+            {'sources' in data && <SourceLinks sources={data.sources} />}
             <p className="entry-preview">{'body' in data ? data.body : data.notes}</p>
             {confirm === item.id && <div className="actions confirm"><span>Xóa “{data.title}”?</span>
               <Button variant="danger" disabled={action.busy} onClick={() => void action.run(async () => {

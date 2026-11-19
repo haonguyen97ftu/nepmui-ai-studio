@@ -1,20 +1,21 @@
-import { useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { ArrowUp, Bot, Plus, ScanLine } from 'lucide-react'
-import type { Entry } from '../worker/contracts'
+import type { Entry, SourceRef } from '../worker/contracts'
 import { api, useAction } from './api'
 import { label } from './locale'
+import { SourceLinks } from './sources'
 import { Button } from './ui/button'
 import { Badge, Empty, Feedback, PageTitle } from './ui/common'
 
 type Session = {
   conversation: Entry<'conversations'>
-  result: { text: string; reason: string; sourceId?: string; sources: { id: string; title: string; body: string }[]; provider: string; latency: number }
+  result: { text: string; reason: string; sourceId?: string; sources: { id: string; title: string; body: string }[]; provider: string; latency: number; method: string; references: SourceRef[]; products: (SourceRef & { availability: string; price: number })[] }
 }
 
 export function Transcript({ messages }: { messages: Entry<'conversations'>['data']['messages'] }) {
   return <ol className="transcript">{messages.map((message, index) => <li key={index} className={`bubble bubble-${message.role}`}>
     <small>{message.role === 'user' ? 'Người hỏi' : message.role === 'assistant' ? 'Trợ lý AI' : 'Nhân viên'}</small>
-    <p>{message.text}</p>{message.reason && <Badge value={message.reason} />}
+    <p>{message.text}</p>{message.reason && <Badge value={message.reason} />}<SourceLinks sources={message.sources} />
   </li>)}</ol>
 }
 
@@ -22,6 +23,10 @@ export function Playground() {
   const [session, setSession] = useState<Session>()
   const [question, setQuestion] = useState('')
   const action = useAction()
+  const transcript = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (session && transcript.current) transcript.current.scrollTop = transcript.current.scrollHeight
+  }, [session])
   function send(event: FormEvent) {
     event.preventDefault()
     if (!question.trim() || action.busy) return
@@ -40,7 +45,7 @@ export function Playground() {
       <section className="card padded chat-card">
         <div className="card-heading"><div className="inline-heading"><span className="icon-tile olive"><Bot size={19} /></span>
           <div><h2>Trợ lý NẾP MÙI</h2><p>Hội thoại thử</p></div></div><span className="badge badge-draft">Thử nghiệm</span></div>
-        <div className="chat-body" aria-live="polite">{session ?
+        <div className="chat-body" ref={transcript} aria-live="polite">{session ?
           <Transcript messages={session.conversation.data.messages} /> :
           <Empty title="Bắt đầu bằng một câu hỏi">Hãy thử một câu hỏi có trong kho tri thức đã xuất bản.</Empty>}
           {action.busy && <p className="muted" role="status">Đang tìm nguồn tri thức…</p>}
@@ -56,7 +61,9 @@ export function Playground() {
         <div className="inline-heading"><span className="icon-tile stone"><ScanLine size={18} /></span><h2>Kiểm tra phản hồi</h2></div>
         {session ? <>
           <dl><div><dt>Kết quả</dt><dd>{label[session.result.reason] ?? session.result.reason}</dd></div>
-            <div><dt>Nhà cung cấp</dt><dd>{session.result.provider}</dd></div><div><dt>Thời gian</dt><dd>{session.result.latency} ms</dd></div></dl>
+            <div><dt>Nhà cung cấp</dt><dd>{session.result.provider}</dd></div><div><dt>Cách trả lời</dt><dd>{({generated:'Hội thoại có căn cứ', mock:'Mô phỏng', handover:'Chuyển tiếp', 'extractive-fallback':'Tóm tắt theo nguồn'})[session.result.method] ?? session.result.method}</dd></div><div><dt>Thời gian</dt><dd>{session.result.latency} ms</dd></div></dl>
+          <SourceLinks sources={session.result.references} />
+          {session.result.products.length > 0 && <><h3>Sản phẩm truy xuất</h3><SourceLinks sources={session.result.products} /></>}
           <h3>Nguồn truy xuất ({session.result.sources.length})</h3>
           {session.result.sources.length ? session.result.sources.map(source => <details key={source.id}>
             <summary>{source.title}{source.id === session.result.sourceId ? ' · Đã dùng' : ''}</summary><p>{source.body}</p>

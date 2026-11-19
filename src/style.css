@@ -206,3 +206,15 @@ details p { color: var(--muted); font-size: .88rem; margin-top: 7px; }
   .search input { width: min(33vw, 130px); }
   .card-heading { flex-wrap: wrap; }
 }
+.source-links { display: flex; flex-wrap: wrap; gap: 6px; list-style: none; margin: 8px 0; padding: 0; }
+.source-links a { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 5px; color: var(--olive-dark); border: 1px solid var(--border); background: var(--surface); border-radius: 7px; padding: 5px 8px; font-size: .78rem; }
+.source-links a:hover { text-decoration: underline; }
+.handover label.checkbox { display: flex; }
+@media (max-width: 640px) {
+  .source-links a { min-height: 44px; align-items: center; }
+  .library-row > .actions { justify-content: start; }
+  .library-entry .entry-preview { padding-bottom: 7px; }
+  .conversation-grid .entry-link { min-height: 58px; }
+}
+.delivery-status { margin: 12px 0; padding: 9px; border: 1px solid var(--border); border-radius: 7px; }
+.delivery-status ul { margin: 5px 0 0; padding-inline-start: 16px; color: var(--muted); font-size: .8rem; list-style: disc; }

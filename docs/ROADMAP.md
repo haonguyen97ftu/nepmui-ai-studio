@@ -1,16 +1,26 @@
 # Roadmap
 
-## First approved release
+## Phase 2 staging acceptance
 
-- Release the credential-free workflows for internal use with an authenticated Worker and isolated production D1.
-- Import verified product and support content and evaluate grounded answers in Vietnamese before enabling inference for real data.
-- Set a conversation retention policy before ingesting external customer messages.
+- Provision authenticated staging on Workers Free and run the Vietnamese benchmark with real Workers AI.
+- Review tone, multi-turn recommendations, privacy redaction and difficult policy questions with a Vietnamese reviewer.
+- Verify retention and human takeover with staged synthetic data. Keep live Messenger off.
 
-## Subsequent milestones
+## Import evaluation
 
-- Add per-user authentication, organization roles and reviewer attribution.
-- Add accent-insensitive full-text retrieval beyond the bounded MVP corpus and evaluate a founder-approved test set.
-- Add catalog-to-knowledge publishing with explicit review and inventory freshness rules.
-- Add routing and ownership for human support, retention tools and operator notifications.
-- Evaluate signed Instagram and website transports. Design and test opt-in live delivery and retries before seeking approval.
-- Add locale switching and complete English copy. Add Gemini and OpenAI only if they meet cost and privacy requirements.
+| Format | Phase 2 outcome |
+| --- | --- |
+| CSV, TXT and Markdown | Existing draft import remains supported and browser tested |
+| Text PDF | Evaluate Mozilla PDF.js for isolated client-side text extraction. It needs page and byte limits, a Worker bundle, meaningful text-order handling, and browser performance checks. Image-only PDFs would need separate OCR |
+| DOCX | Evaluate Mammoth raw-text extraction in an isolated client worker. Add ZIP expansion, entry-count, file-size and time limits. Use text output only and keep review-before-publication |
+| Scanned PDF and legacy DOC | Keep manual conversion until an affordable, privacy-reviewed option is validated |
+
+Neither candidate library requires paid API calls. Phase 2 ships the evaluation and leaves extraction of unsupported formats to a separate change. [PDF.js](https://mozilla.github.io/pdf.js/) · [Mammoth](https://github.com/mwilliamson/mammoth.js)
+
+## Later milestones
+
+- Add individual accounts, reviewer roles and auditable operator ownership.
+- Test Meta App Review, delivery telemetry and manual reconciliation on an approved test Page before seeking outbound production approval.
+- Improve multilingual retrieval relevance, product intent, and the Vietnamese benchmark with founder-approved examples.
+- Add explicit privacy-request suppression and verification for external-channel replays and backup lifecycle.
+- Complete English UI and assess transport adapters for Instagram and the website.

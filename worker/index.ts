@@ -1,11 +1,13 @@
 import { Hono } from 'hono'
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie'
 import { z } from 'zod'
-import { answer, type Inference } from './ai'
-import { channelAdapters, receive, signatureValid } from './channels'
+import { answer, redact, type Inference } from './ai'
+import { channelAdapters, receiveBatch, signatureValid } from './channels'
 import { chatInput, contracts, conversationAction, type Data } from './contracts'
 import { authorized, bodyBytes, equalSecret, jsonBody, newSession, sessionAge, sessionCookie } from './security'
 import { studio, type Studio } from './store'
+import { canSend, drainMessenger } from './messenger'
+import { admitLogin, deleteThread, purge, retentionDays, revoke, revoked } from './privacy'
 
 export type Env = {
   DB: D1Database
@@ -16,6 +18,10 @@ export type Env = {
   META_VERIFY_TOKEN?: string
   META_PAGE_ID?: string
   MESSENGER_INGEST?: string
+  MESSENGER_OUTBOUND?: string
+  META_PAGE_TOKEN?: string
+  META_GRAPH_VERSION?: string
+  STUDIO_ENV?: string
   WORKERS_AI_ENABLED?: string
   DEMO?: 'loopback'
 }
@@ -23,6 +29,10 @@ export type Env = {
 const app = new Hono<{ Bindings: Env; Variables: { store: Studio; demo: boolean } }>()
 const authCookieOptions = { path: '/', secure: true, httpOnly: true, sameSite: 'Strict' } as const
 const versionInput = z.number().int().positive()
+async function authenticated(env: Env, cookie: string | undefined) {
+  return await authorized(env.ADMIN_SECRET, env.BRAND_ID, cookie) &&
+    !await revoked(env.DB, env.BRAND_ID, cookie)
+}
 const webhooks = '/api/webhooks/messenger'
 
 app.use('/api/*', async (c, next) => {
@@ -36,7 +46,7 @@ app.use('/api/*', async (c, next) => {
   const safe = c.req.method === 'GET' || c.req.method === 'HEAD'
   if (!safe && c.req.header('Origin') !== url.origin) return c.json({ error: 'origin_denied' }, 403)
   const publicSession = url.pathname === '/api/session' && ['GET', 'POST'].includes(c.req.method)
-  if (!publicSession && !demo && !await authorized(c.env.ADMIN_SECRET, c.env.BRAND_ID, getCookie(c, sessionCookie))) {
+  if (!publicSession && !demo && !await authenticated(c.env, getCookie(c, sessionCookie))) {
     return c.json({ error: 'unauthorized' }, 401)
   }
   await next()
@@ -44,17 +54,23 @@ app.use('/api/*', async (c, next) => {
 
 app.get('/api/session', async c => {
   const demo = c.get('demo')
-  const authenticated = demo || await authorized(c.env.ADMIN_SECRET, c.env.BRAND_ID, getCookie(c, sessionCookie))
-  return c.json({ authenticated, demo, brand: authenticated ? await c.get('store').brand() : undefined })
+  const signedIn = demo || await authenticated(c.env, getCookie(c, sessionCookie))
+  return c.json({ authenticated: signedIn, demo, staging: c.env.STUDIO_ENV === 'staging', brand: signedIn ? await c.get('store').brand() : undefined })
 })
 app.post('/api/session', async c => {
-  const secret = c.env.ADMIN_SECRET
+  const { ADMIN_SECRET: secret, DB, BRAND_ID } = c.env
+  if (!secret || secret.length < 32) return c.json({ error: 'unauthorized' }, 401)
+  if (!await admitLogin(DB, BRAND_ID, secret, c.req.header('CF-Connecting-IP') ?? 'direct')) {
+    c.header('Retry-After', '600')
+    return c.json({ error: 'login_limit' }, 429)
+  }
   const { token } = z.object({ token: z.string().max(512) }).parse(await jsonBody(c.req.raw))
-  if (!secret || secret.length < 32 || !await equalSecret(token, secret)) return c.json({ error: 'unauthorized' }, 401)
+  if (!await equalSecret(token, secret)) return c.json({ error: 'unauthorized' }, 401)
   setCookie(c, sessionCookie, await newSession(secret, c.env.BRAND_ID), { ...authCookieOptions, maxAge: sessionAge })
   return c.json({ ok: true })
 })
-app.delete('/api/session', c => {
+app.delete('/api/session', async c => {
+  await revoke(c.env.DB, c.env.BRAND_ID, getCookie(c, sessionCookie))
   deleteCookie(c, sessionCookie, authCookieOptions)
   return c.json({ ok: true })
 })
@@ -85,6 +101,10 @@ for (const kind of ['knowledge', 'products', 'training', 'conversations'] as con
 }
 
 for (const kind of ['knowledge', 'products', 'training'] as const) {
+  app.get(`/api/${kind}/:id`, async c => {
+    const item = await c.get('store').get(kind, c.req.param('id'))
+    return item ? c.json(item) : c.json({ error: 'missing' }, 404)
+  })
   app.post(`/api/${kind}`, async c => {
     const data = contracts[kind].parse(await jsonBody(c.req.raw))
     if ('status' in data && data.status !== 'draft') return c.json({ error: 'draft_required' }, 409)
@@ -105,6 +125,9 @@ for (const kind of ['knowledge', 'products', 'training'] as const) {
       ))
       if (!allowed) return c.json({ error: 'invalid_transition' }, 409)
     }
+    if (kind === 'training' && 'body' in data && 'status' in data && data.status !== 'draft' && !data.body.trim()) {
+      return c.json({ error: 'invalid_input' }, 400)
+    }
     const result = await store.update(kind, current.id, data, version)
     return result ? c.json(result) : c.json({ error: 'conflict' }, 409)
   })
@@ -114,6 +137,17 @@ for (const kind of ['knowledge', 'products', 'training'] as const) {
       ? c.json({ ok: true }) : c.json({ error: 'conflict' }, 409)
   })
 }
+app.get('/api/knowledge/:id/history', async c => c.json(await c.get('store').history(c.req.param('id'))))
+app.post('/api/knowledge/:id/restore', async c => {
+  const { revision, version } = z.object({ revision: z.string().min(1).max(64), version: versionInput }).parse(await jsonBody(c.req.raw))
+  const id = c.req.param('id')
+  const store = c.get('store')
+  const snapshot = await store.snapshot(id, revision)
+  if (!snapshot) return c.json({ error: 'missing' }, 404)
+  const data = contracts.knowledge.parse(JSON.parse(snapshot.data))
+  const restored = await store.update('knowledge', id, { ...data, status: 'draft' }, version)
+  return restored ? c.json(restored) : c.json({ error: 'conflict' }, 409)
+})
 const importedItem = contracts.knowledge.omit({ status: true })
 app.post('/api/knowledge/import', async c => {
   const items = z.array(importedItem).min(1).max(30).parse(await jsonBody(c.req.raw))
@@ -154,12 +188,12 @@ app.post('/api/playground', async c => {
   if (input.conversationId && previous?.data.channel !== 'playground') return c.json({ error: 'missing' }, 404)
   const history = previous?.data.messages ?? []
   const result = await answer(store, c.env.WORKERS_AI_ENABLED === 'true' ? c.env.AI : undefined, input.question,
-    history.filter(message => message.role === 'user').map(message => message.text))
+    history)
   const data: Data<'conversations'> = {
     title: previous?.data.title ?? input.question.slice(0, 160), channel: 'playground',
     status: result.reason === 'grounded' && previous?.data.status !== 'handover' ? 'answered' : 'handover',
     messages: [...history, { role: 'user' as const, text: input.question }, {
-      role: 'assistant' as const, text: result.text, reason: result.reason, latency: result.latency, provider: result.provider,
+      role: 'assistant' as const, text: result.text, reason: result.reason, latency: result.latency, provider: result.provider, sources: result.references,
     }].slice(-40),
   }
   const saved = previous
@@ -170,7 +204,10 @@ app.post('/api/playground', async c => {
 app.get('/api/conversations/detail-empty', c => c.json({ item: null }))
 app.get('/api/conversations/:id', async c => {
   const item = await c.get('store').get('conversations', c.req.param('id'))
-  return item ? c.json({ item }) : c.json({ error: 'missing' }, 404)
+  if (!item) return c.json({ error: 'missing' }, 404)
+  const delivery = await c.env.DB.prepare(`SELECT state, attempts, received FROM messenger_outbox
+    WHERE brand_id=? AND thread_id=? ORDER BY received DESC LIMIT 20`).bind(c.env.BRAND_ID, item.id).all()
+  return c.json({ item, delivery: delivery.results })
 })
 app.patch('/api/conversations/:id', async c => {
   const input = conversationAction.parse(await jsonBody(c.req.raw))
@@ -180,24 +217,51 @@ app.patch('/api/conversations/:id', async c => {
   const { messages } = existing.data
   const reply = input.reply ? [{ role: 'human' as const, text: input.reply }] : []
   const saved = await store.update('conversations', existing.id,
-    { ...existing.data, status: input.status, messages: [...messages, ...reply].slice(-40) }, input.version)
+    { ...existing.data, status: input.status, paused: input.paused ?? existing.data.paused, messages: [...messages, ...reply].slice(-40) }, input.version)
   return saved ? c.json(saved) : c.json({ error: 'conflict' }, 409)
 })
 
+app.delete('/api/conversations/:id', async c => {
+  const version = z.coerce.number().int().positive().parse(c.req.query('version'))
+  return await deleteThread(c.env.DB, c.env.BRAND_ID, c.req.param('id'), version)
+    ? c.json({ ok: true }) : c.json({ error: 'conflict' }, 409)
+})
+app.post('/api/conversations/:id/training', async c => {
+  const store = c.get('store')
+  const item = await store.get('conversations', c.req.param('id'))
+  if (!item) return c.json({ error: 'missing' }, 404)
+  const assistantIndex = item.data.messages.findLastIndex(message => message.role === 'assistant')
+  const userIndex = item.data.messages.findLastIndex(message => message.role === 'user')
+  const last = userIndex > assistantIndex ? undefined : item.data.messages[assistantIndex]
+  const message = userIndex > assistantIndex ? item.data.messages[userIndex] :
+    item.data.messages.slice(0, assistantIndex).findLast(message => message.role === 'user')
+  const data = contracts.training.parse({ title: redact(message?.text ?? item.data.title).slice(0, 160),
+    incorrect: redact(last?.text ?? ''), body: '', status: 'draft', sources: last?.sources })
+  return c.json(await store.create('training', data), 201)
+})
+app.get('/api/privacy', async c => c.json({ days: await retentionDays(c.env.DB, c.env.BRAND_ID) }))
+app.put('/api/privacy', async c => {
+  const { days } = z.object({ days: z.number().int().min(1).max(365) }).parse(await jsonBody(c.req.raw))
+  await c.env.DB.prepare('INSERT INTO retention VALUES (?,?) ON CONFLICT(brand_id) DO UPDATE SET days=excluded.days')
+    .bind(c.env.BRAND_ID, days).run()
+  return c.json({ days })
+})
+app.post('/api/privacy/purge', async c => c.json({ count: await purge(c.env.DB, c.env.BRAND_ID) }))
+
 app.get('/api/integrations', c => c.json({
-  messenger: c.env.MESSENGER_INGEST === 'true' && !!(c.env.META_PAGE_ID && c.env.META_APP_SECRET && c.env.META_VERIFY_TOKEN),
-  outbound: false,
+  messenger: c.env.STUDIO_ENV !== 'staging' && c.env.MESSENGER_INGEST === 'true' && !!(c.env.META_PAGE_ID && c.env.META_APP_SECRET && c.env.META_VERIFY_TOKEN),
+  outbound: canSend(c.env),
 }))
 app.post('/api/integrations/messenger/mock', async c => {
   const items = channelAdapters.messenger.decode(await jsonBody(c.req.raw), '100')
-  let accepted = 0
-  for (const item of items) accepted += Number(await receive(c.env.DB, c.env.BRAND_ID, 'messenger-mock', item))
-  return c.json({ accepted, duplicate: items.length - accepted })
+  const accepted = await receiveBatch(c.env.DB, c.env.BRAND_ID, 'messenger-mock', items, true)
+  const sent = await drainMessenger(c.env, 'messenger-mock')
+  return c.json({ accepted, duplicate: items.length - accepted, sent })
 })
 app.get(webhooks, async c => {
   const token = c.env.META_VERIFY_TOKEN
   const challenge = c.req.query('hub.challenge') ?? ''
-  if (c.env.MESSENGER_INGEST !== 'true' || !token || c.req.query('hub.mode') !== 'subscribe' ||
+  if (c.env.STUDIO_ENV === 'staging' || c.env.MESSENGER_INGEST !== 'true' || !token || c.req.query('hub.mode') !== 'subscribe' ||
     !/^\d{1,64}$/.test(challenge) || !await equalSecret(c.req.query('hub.verify_token') ?? '', token)) {
     return c.text('Forbidden', 403)
   }
@@ -205,11 +269,11 @@ app.get(webhooks, async c => {
 })
 app.post(webhooks, async c => {
   const { META_APP_SECRET, META_PAGE_ID, MESSENGER_INGEST, DB, BRAND_ID } = c.env
-  if (MESSENGER_INGEST !== 'true' || !META_APP_SECRET || !META_PAGE_ID) return c.text('Forbidden', 403)
+  if (c.env.STUDIO_ENV === 'staging' || MESSENGER_INGEST !== 'true' || !META_APP_SECRET || !META_PAGE_ID) return c.text('Forbidden', 403)
   const bytes = await bodyBytes(c.req.raw, 48_000)
   if (!await signatureValid(META_APP_SECRET, bytes, c.req.header('X-Hub-Signature-256') ?? '')) return c.text('Forbidden', 403)
   const events = channelAdapters.messenger.decode(JSON.parse(new TextDecoder().decode(bytes)), META_PAGE_ID)
-  for (const event of events) await receive(DB, BRAND_ID, 'messenger', event)
+  await receiveBatch(DB, BRAND_ID, 'messenger', events, canSend(c.env))
   return c.text('EVENT_RECEIVED')
 })
 
@@ -220,4 +284,11 @@ app.onError((error, c) => {
 })
 app.notFound(c => c.json({ error: 'missing' }, 404))
 
-export default app
+export default {
+  fetch: app.fetch,
+  async scheduled(controller: ScheduledController, env: Env) {
+    if (controller.cron === '15 3 * * *') await purge(env.DB, env.BRAND_ID)
+    else if (env.STUDIO_ENV === 'staging') await drainMessenger(env, 'messenger-mock')
+    else if (canSend(env)) await drainMessenger(env, 'messenger')
+  },
+}
