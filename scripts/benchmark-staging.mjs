@@ -53,7 +53,7 @@ try {
       (scenario.includes ?? []).every(text => result.text.includes(text)) &&
       (scenario.excludes ?? []).every(text => !result.text.includes(text))
     passed += Number(ok)
-    console.log(JSON.stringify({ scenario: scenario.id, passed: ok, method: result.method, reason: result.reason, ms: result.latency }))
+    console.log(JSON.stringify({ scenario: scenario.id, passed: ok, method: result.method, reason: result.reason, ms: result.latency, diagnostic: result.diagnostic }))
   }
   console.log(JSON.stringify({ passed, total: fixture.cases.length }))
   if (passed !== fixture.cases.length) process.exitCode = 1

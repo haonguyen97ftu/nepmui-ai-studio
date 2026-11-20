@@ -59,11 +59,24 @@ function requestFor(input: ProviderInput) {
   }
 }
 
-async function generate(ai: Inference, model: typeof models[number], request: ReturnType<typeof requestFor>) {
+type Diagnostic = { code: string; responseType?: string; outputBytes?: number; fields?: string[] }
+async function generate(ai: Inference, model: typeof models[number], request: ReturnType<typeof requestFor>, diagnostic: Diagnostic) {
   const result = await ai.run(model, request)
-  if (!result || typeof result !== 'object' || !('response' in result)) return null
-  const raw = typeof result.response === 'string' ? JSON.parse(result.response) : result.response
+  if (!result || typeof result !== 'object' || !('response' in result)) {
+    diagnostic.code = 'response_envelope'
+    return null
+  }
+  diagnostic.responseType = typeof result.response
+  diagnostic.outputBytes = typeof result.response === 'string' ? new TextEncoder().encode(result.response).length : undefined
+  let raw: unknown
+  try { raw = typeof result.response === 'string' ? JSON.parse(result.response) : result.response }
+  catch { diagnostic.code = 'invalid_json'; return null }
   const parsed = planSchema.safeParse(raw)
+  diagnostic.code = parsed.success ? 'valid_plan' : 'invalid_schema'
+  if (!parsed.success && raw && typeof raw === 'object') {
+    // Only known field names, never arbitrary keys, values, exception text or IDs.
+    diagnostic.fields = ['abstain', 'tone', 'knowledge', 'products', 'closing'].filter(key => key in raw)
+  }
   return parsed.success ? parsed.data : null
 }
 
@@ -100,10 +113,11 @@ export async function answer(store: Studio, ai: Inference | undefined, question:
   const fallback = persona.language === 'en'
     ? 'I’ll pass your question to our support team for confirmation.'
     : 'NẾP MÙI sẽ chuyển câu hỏi của bạn đến đội ngũ hỗ trợ để xác nhận.'
+  const diagnostic: Diagnostic = { code: 'not_called' }
   let sources: Source[] = []
   let products: Product[] = []
   const finish = (reason: string, text = fallback, references: SourceRef[] = [], method = 'handover') => ({
-    text, reason, sourceId: references[0]?.id, references, sources, products, method, provider, latency: Date.now() - started,
+    text, reason, diagnostic, sourceId: references[0]?.id, references, sources, products, method, provider, latency: Date.now() - started,
   })
   const normalized = normalize(question)
   if (sensitive.test(normalized) || suspicious.test(normalized) || redact(question) !== question) return finish('sensitive')
@@ -170,14 +184,16 @@ export async function answer(store: Studio, ai: Inference | undefined, question:
     const day = new Date().toISOString().slice(0, 10)
     if (!await store.reserve(day, config.dailyLimit, config.dailyNeurons, budget(request))) return finish('limit_reached')
     try {
-      const plan = await generate(ai, config.model, request)
+      const plan = await generate(ai, config.model, request, diagnostic)
       if (plan?.abstain) return finish('no_selection')
       if (plan) {
         const grounded = output(plan, 'generated')
         if (grounded) return grounded
+        diagnostic.code = 'invalid_selection'
       }
-    } catch {
-      // Malformed or unavailable model output uses deterministic grounded rendering.
+    } catch (error) {
+      diagnostic.code = error instanceof Error && /JSON Mode couldn't be met/i.test(error.message)
+        ? 'json_mode_unmet' : 'inference_error'
     }
     return output(safePlan, 'extractive-fallback') ?? finish('no_selection')
   } catch {
