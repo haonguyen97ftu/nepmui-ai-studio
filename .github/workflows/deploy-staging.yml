@@ -63,9 +63,24 @@ jobs:
               body: payload === undefined ? undefined : JSON.stringify(payload)
             })
           }
-          const home = await fetch(origin, { redirect: 'error', signal: AbortSignal.timeout(15000) })
-          assert.equal(home.status, 200)
-          const signedOut = await (await api('session')).json()
+          let signedOut
+          for (let attempt = 0; attempt < 12; attempt++) {
+            try {
+              const home = await fetch(origin, { redirect: 'error', signal: AbortSignal.timeout(8000) })
+              const session = await api('session')
+              if (home.ok && session.ok) {
+                const state = await session.json()
+                if (state.staging === true) {
+                  signedOut = state
+                  break
+                }
+              }
+            } catch {
+              // Initial workers.dev routing can take time to propagate.
+            }
+            await new Promise(resolve => setTimeout(resolve, 5000))
+          }
+          assert.ok(signedOut, 'The deployed staging URL did not become ready')
           assert.equal(signedOut.staging, true)
           assert.equal(signedOut.authenticated, false)
           assert.equal(signedOut.brand, undefined)
