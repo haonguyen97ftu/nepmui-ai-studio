@@ -18,9 +18,28 @@ The [initial hosted run](https://github.com/haonguyen97ftu/nepmui-ai-studio/acti
 
 The optimization requests Cloudflare `json_schema` with required typed fields, supported tone/closing values, current candidate ID enums and bounded unique arrays. A 512-token ceiling replaces 256, and the complete request including the schema is included in the conservative UTF-8-byte input reservation. Local strict validation, source membership checks, deterministic factual rendering, fallback and human handover remain mandatory. There is no unreserved retry. Prices and stock always come from the current catalog revision; knowledge remains published-only. “Generated” means a valid model-composed reply plan rendered with trusted facts, not unrestricted model prose.
 
-Diagnostics expose only fixed codes, response type, byte counts, known field-name presence, maximum output tokens and reserved Neurons. They contain no question, history, prompt, response text, arbitrary keys, IDs, credentials or exception messages. The authenticated Playground returns them and the synthetic benchmark writes them as JSON to Actions logs. They are not persisted into customer messages. Existing logs/traces configuration is unchanged.
+Diagnostics expose only fixed codes, response type, byte counts, known field-name presence, maximum output tokens, reserved Neurons, numeric provider codes and known schema-keyword names. They contain no question, history, prompt, response text, arbitrary keys, IDs, credentials or exception messages. The authenticated Playground returns them and the synthetic benchmark writes them as JSON to Actions logs. They are not persisted into customer messages. Existing logs/traces configuration is unchanged.
 
-The unchanged original 13 assertions remain the release gate. Two additional hosted checks cover preference continuation and a price/stock follow-up after a synthetic catalog update, including current source version. The [first explicit-schema attempt](https://github.com/haonguyen97ftu/nepmui-ai-studio/actions/runs/44753635674) scored 6/13: all inference requests threw before returning a response (`inference_error`), while the six pre-inference handovers remained correct. Both extra checks failed. Staging limit restoration succeeded. The next revision removes provider-side `uniqueItems` (local duplicate rejection remains mandatory), adds fixed provider-error categories/numeric codes/known schema keywords, and is pending hosted evaluation. Vietnamese editorial review and actual Meta delivery remain separate; Meta needs an approved isolated test Page.
+The unchanged original 13 assertions remain the release gate. Two additional hosted checks cover preference continuation and a price/stock follow-up after a synthetic catalog update, including current source version. The [first explicit-schema attempt](https://github.com/haonguyen97ftu/nepmui-ai-studio/actions/runs/44753635674) scored 6/13: all inference requests threw before returning a response (`inference_error`), while the six pre-inference handovers remained correct. Both extra checks failed. Staging limit restoration succeeded. The next revision removes provider-side `uniqueItems` (local duplicate rejection remains mandatory), adds fixed provider-error categories/numeric codes/known schema keywords, and passed hosted evaluation below. Vietnamese editorial review and actual Meta delivery remain separate; Meta needs an approved isolated test Page.
+
+## Optimized hosted acceptance
+
+[Successful staging run 44754252759](https://github.com/haonguyen97ftu/nepmui-ai-studio/actions/runs/44754252759) deployed **`8af07112fb383ea08dddc010d80dbf09196cc6a0`** through the existing staging workflow. Both the deployment job and [release CI](https://github.com/haonguyen97ftu/nepmui-ai-studio/actions/runs/44754242569) completed successfully. This release differs from the rejected provider request by omitting `uniqueItems`; uniqueness is still enforced locally. The hosted provider accepted the simplified schema. No raw provider exception message was collected, so this identifies the incompatible request constraint by the controlled request change rather than a quoted provider error.
+
+| Hosted check | Result |
+| --- | --- |
+| Original benchmark, unchanged assertions | **13/13 passed** |
+| Consultation, fragrance-preference, current-price, stock-check, accent-free | All `generated`, `grounded`, `valid_plan` |
+| Policy and care | Both generated with published facts |
+| Unknowns, sensitive requests, injection and private data | All required handovers preserved |
+| Preference continuation | Passed; uses matching fragrance and does not repeat the answered preference question |
+| Price/stock follow-up after catalog mutation | Passed; 265.000 ₫, hết hàng, current source revision, no stale 245.000 price |
+| Generated-case latency in original suite | 1,864–4,925 ms; median 3,170 ms (seven cases, one run) |
+| Synthetic fixture/conversation cleanup | Succeeded |
+| Restore normal staging limits | Succeeded: 20 calls / 4,000 reserved Neurons; cumulative counters unchanged |
+| Hosted auth, admin API, Workers AI binding, disabled Messenger ingress/outbound | Passed |
+
+This is one actual hosted evaluation, not a reliability guarantee across repeated runs or a substitute for native Vietnamese editorial review. The model selected tone, closing and current source IDs; application rendering supplied the factual Vietnamese sentences. No paid services, production deployment, main merge or live Messenger activation occurred. Final evidence-only documentation commits do not change the deployed runtime.
 
 ## Cloud workspace results
 
