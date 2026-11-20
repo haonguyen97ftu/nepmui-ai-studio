@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { ArrowUp, Bot, Plus, ScanLine } from 'lucide-react'
 import type { Entry, SourceRef } from '../worker/contracts'
-import { api, useAction } from './api'
+import { api, useResource, useAction } from './api'
 import { label } from './locale'
 import { SourceLinks } from './sources'
 import { Button } from './ui/button'
@@ -19,8 +19,11 @@ export function Transcript({ messages }: { messages: Entry<'conversations'>['dat
   </li>)}</ol>
 }
 
-export function Playground() {
+export function Playground({name='AI Studio'}:{name?:string}) {
   const [session, setSession] = useState<Session>()
+  const contexts=useResource<{items:{id:string;name:string}[]}>('channels')
+  const agents=useResource<{items:{id:string;name:string}[]}>('agents')
+  const [channelId,setChannelId]=useState(''),[agentId,setAgentId]=useState('')
   const [question, setQuestion] = useState('')
   const action = useAction()
   const transcript = useRef<HTMLDivElement>(null)
@@ -30,7 +33,7 @@ export function Playground() {
   function send(event: FormEvent) {
     event.preventDefault()
     if (!question.trim() || action.busy) return
-    const input = { question, conversationId: session?.conversation.id }
+    const input = { question, conversationId: session?.conversation.id,channelId:channelId||undefined,agentId:agentId||undefined }
     void action.run(async () => {
       const result = await api<Session>('playground', 'POST', input)
       setSession(result)
@@ -41,10 +44,12 @@ export function Playground() {
     <PageTitle kicker="VẬN HÀNH AI" title="Phòng thử nghiệm" copy="Thử câu trả lời và kiểm tra nguồn tri thức trong một hội thoại thử."
       action={<Button variant="outline" disabled={action.busy || !session} onClick={() => { setSession(undefined); setQuestion('') }}>
         <Plus size={16} /> Hội thoại mới</Button>} />
+    <div className="card padded field-grid"><label>Ngữ cảnh kênh<select aria-label="Ngữ cảnh kênh" value={channelId} onChange={e=>{setChannelId(e.target.value);setSession(undefined)}}><option value="">Mặc định không gian</option>{contexts.value?.items.map(row=><option key={row.id} value={row.id}>{row.name}</option>)}</select></label>
+      <label>Trợ lý thử nghiệm<select value={agentId} onChange={e=>{setAgentId(e.target.value);setSession(undefined)}}><option value="">Theo cấu hình kênh / không gian</option>{agents.value?.items.map(row=><option key={row.id} value={row.id}>{row.name}</option>)}</select></label></div>
     <div className="dashboard-grid playground-grid">
       <section className="card padded chat-card">
         <div className="card-heading"><div className="inline-heading"><span className="icon-tile olive"><Bot size={19} /></span>
-          <div><h2>Trợ lý NẾP MÙI</h2><p>Hội thoại thử</p></div></div><span className="badge badge-draft">Thử nghiệm</span></div>
+          <div><h2>Trợ lý {name}</h2><p>Hội thoại thử</p></div></div><span className="badge badge-draft">Thử nghiệm</span></div>
         <div className="chat-body" ref={transcript} aria-live="polite">{session ?
           <Transcript messages={session.conversation.data.messages} /> :
           <Empty title="Bắt đầu bằng một câu hỏi">Hãy thử một câu hỏi có trong kho tri thức đã xuất bản.</Empty>}

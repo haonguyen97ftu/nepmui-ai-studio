@@ -1,3 +1,13 @@
+# Current product scope — NM-AI-04
+
+AI Studio is a temporary neutral platform name. NẾP MÙI is the preserved first workspace, not the platform identity. Workspaces own independent knowledge, products, persona, reusable agents, training, conversations, settings, version/audit history, usage and connected channels. Super Admin manages global resources and accounts; Brand Admin, AI Trainer, Customer Service and Viewer operate only within authorized memberships.
+
+The implemented candidate includes account sessions and founder bootstrap, active/inactive/archived workspaces, a multi-Page registry with encrypted credentials and separately verified live ownership, scoped mock routing, per-Page takeover, a shared factual AI engine, fair global/workspace quotas, responsive management screens and a non-destructive migration/recovery plan. Existing Vietnamese benchmark assertions remain the acceptance gate. Instagram/widget public transports, OAuth/SSO/MFA, email recovery, billing, production and live Messenger activation remain outside this release.
+
+See [architecture](ARCHITECTURE.md), [QA](QA_REPORT.md) and [migration readiness](MIGRATION_REPORT.md). Hosted NM-AI-04 schema rollout requires separate approval.
+
+## Original first-workspace foundation
+
 # Product specification
 
 | Module | MVP workflow |

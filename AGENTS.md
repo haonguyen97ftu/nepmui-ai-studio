@@ -1,4 +1,4 @@
-# NẾP MÙI AI Studio
+# AI Studio
 
 - Use Node.js 24, npm and the committed lockfile. Use the pinned Cloudflare `cf` CLI.
 - Run `npm ci`, `npm run lint`, `npm run typecheck`, `npm run build:worker`, `npm test`, and `npm run test:e2e` before opening a PR. The backend and browser suites use the built Worker.

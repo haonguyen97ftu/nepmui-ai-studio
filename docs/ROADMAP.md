@@ -1,26 +1,28 @@
 # Roadmap
 
-## Phase 2 staging acceptance
+## Implemented candidate: NM-AI-04
 
-- Provision authenticated staging on Workers Free and run the Vietnamese benchmark with real Workers AI.
-- Review tone, multi-turn recommendations, privacy redaction and difficult policy questions with a Vietnamese reviewer.
-- Verify retention and human takeover with staged synthetic data. Keep live Messenger off.
+- Neutral AI Studio platform with NẾP MÙI preserved as the first workspace.
+- Multiple active/inactive/archived workspaces, scoped profiles, account membership and five server-enforced roles.
+- Workspace selector, Super Admin dashboard, onboarding, channel registry, team manager, reusable agents and usage views on desktop/mobile.
+- Multi-Page mock routing, encrypted Page tokens, separately verified live route ownership, per-Page takeover, shared factual AI engine and atomic fair quotas.
+- Non-destructive disposable-D1 migration tests and gated staging backup/recovery procedure.
 
-## Import evaluation
+## Next approval gate
 
-| Format | Phase 2 outcome |
-| --- | --- |
-| CSV, TXT and Markdown | Existing draft import remains supported and browser tested |
-| Text PDF | Evaluate Mozilla PDF.js for isolated client-side text extraction. It needs page and byte limits, a Worker bundle, meaningful text-order handling, and browser performance checks. Image-only PDFs would need separate OCR |
-| DOCX | Evaluate Mammoth raw-text extraction in an isolated client worker. Add ZIP expansion, entry-count, file-size and time limits. Use text output only and keep review-before-publication |
-| Scanned PDF and legacy DOC | Keep manual conversion until an affordable, privacy-reviewed option is validated |
+1. Review PR #1, migration preservation evidence, security findings and screenshots.
+2. Approve the staging recovery point, additive migration and pinned release through the existing GitHub Actions/environment infrastructure.
+3. Provision protected `AUTH_PEPPER` and optional Page encryption key, migrate and claim the founder account. Keep both live Messenger flags false.
+4. Re-run the unchanged 13 original hosted scenarios and two multi-turn checks with a scoped benchmark account after sufficient UTC quota headroom exists. Record actual Free-plan authentication CPU/latency and a Vietnamese reviewer's tone assessment.
 
-Neither candidate library requires paid API calls. Phase 2 ships the evaluation and leaves extraction of unsupported formats to a separate change. [PDF.js](https://mozilla.github.io/pdf.js/) · [Mammoth](https://github.com/mwilliamson/mammoth.js)
+The last approved hosted runtime remains NM-AI-03 until that gate completes. New hosted acceptance is not implied by local tests.
 
-## Later milestones
+## Later work, separate scope
 
-- Add individual accounts, reviewer roles and auditable operator ownership.
-- Test Meta App Review, delivery telemetry and manual reconciliation on an approved test Page before seeking outbound production approval.
-- Improve multilingual retrieval relevance, product intent, and the Vietnamese benchmark with founder-approved examples.
-- Add explicit privacy-request suppression and verification for external-channel replays and backup lifecycle.
-- Complete English UI and assess transport adapters for Instagram and the website.
+- Optional Access/OIDC or another reviewed authentication provider, MFA, public invitation/recovery and verified identity onboarding.
+- Approved Meta test-Page transport rollout, OAuth permissions, delivery reconciliation and migration/disposition of legacy live jobs. Production and live activation each need separate approval.
+- Public Instagram and website-widget transports, English operator UI and richer multilingual retrieval. Registry/adapter interfaces already exist.
+- Evaluate PDF.js and Mammoth in bounded client workers for text PDF/DOCX import; preserve review-before-publication. Scanned formats need a separately reviewed OCR choice.
+- Privacy-request replay suppression, export and backup lifecycle controls.
+
+No SaaS billing, subscription system, domain purchase or paid infrastructure is planned in this change.

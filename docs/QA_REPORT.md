@@ -1,4 +1,33 @@
-# NM-AI-03 QA report
+# NM-AI-04 platform QA
+
+The multi-workspace candidate is tested in the cloud workspace against disposable synthetic D1. The previously approved hosted staging deployment remains NM-AI-03. No NM-AI-04 remote backup, schema migration, Page verification, production operation or live Messenger activation has been performed.
+
+## Current platform verification
+
+| Check | Result |
+| --- | --- |
+| Node.js 24 clean install from committed lockfile | Passed; no authentication dependency added |
+| Lint, TypeScript, default Worker and staging Worker builds | Passed |
+| Unit/integration suite | 75 tests, including existing AI regressions, 21 multi-workspace/security scenarios, a missing-pepper bootstrap check and release/backup guards |
+| Original Vietnamese fixture | All 13 offline scenarios unchanged; hosted assertions and both multi-turn checks preserved |
+| Playwright | 11 passed; 3 intentional project-specific skips |
+| Responsive checks | 320, 768, 1024, 1440px; no document overflow, keyboard focus verified |
+| Disposable migration report | Existing rows/history/pending job preserved; equal snapshot hashes; FTS preserved; no FK violations |
+| New hosted acceptance | Awaiting approved backup, migration and release |
+
+The three-workspace/six-mock-Page fixture exercises cross-tenant record/FTS/agent/channel rejection, explicit membership authorization, role escalation prevention, same sender/event isolation, duplicate handling, per-Page takeover, credential encryption/AAD, signed registry routing, staging live-path rejection, archived workspace write/AI rejection, default/agent/Page precedence, concurrent shared quotas, stale session generations and bounded legacy mock scheduling. Account-mode benchmark login and explicit workspace consistency checks replace the old founder-key dependency after bootstrap; the 13+2 factual/generation assertions are not relaxed.
+
+## Security review and evidence
+
+Read-only review identified and the code now covers archived Brand Admin reactivation, unverified Page claims, admission/pause/archive races, queue cancellation/reopen races, stale login after revoke/reset, benign Page-edit webhook loss and mock queue starvation. Review found no previously reported backend blocker remaining by inspection. Existing quota/factual/handover and standard messaging-window checks still pass. A deliberate removal of the Brand Admin-to-Super Admin guard caused the role-escalation regression to fail; the restored guard passed. The earlier NM-AI-03 source-membership mutation evidence remains below. Admission/session regressions exercise the platform guards directly.
+
+Playwright exercises actual management APIs: create/switch a workspace, configure an agent and Page, submit a mock event, create a member and check Viewer UI rejection on desktop and iPhone. Screenshots use `platform-overview-*`, `platform-agents-*`, `platform-channels-*`, `platform-team-*` and `platform-responsive-*` in `test-results/screenshots`. CI publishes these and `test-results/migration-report.json` in its existing browser-results artifact. A source-level secret scan and API encryption tests use synthetic credentials only.
+
+See [architecture](ARCHITECTURE.md), [security/auth decisions](SECURITY.md), [migration/recovery report](MIGRATION_REPORT.md) and [approved staging sequence](DEPLOYMENT.md). The remaining hosted gates are actual Free-plan authentication cost/latency, the unchanged real-model benchmark after migration, founder bootstrap/access verification, and Vietnamese editorial review. Instagram/widget public ingress, OAuth/SSO/MFA, email invites/recovery, billing and production/live rollout are not part of this release.
+
+---
+
+## NM-AI-03 historical hosted baseline
 
 The cloud workspace and GitHub Actions exercise the built Worker and disposable D1. The browser suite uses Chromium on desktop and an emulated iPhone 15. All product, policy and conversation fixtures are synthetic.
 

@@ -1,4 +1,10 @@
 export const navigation = {
+  account:['Tài khoản của tôi','My account'],
+  platform: ['Nền tảng', 'Platform'],
+  channels: ['Kênh & Pages', 'Channels'],
+  users: ['Thành viên & quyền', 'Team'],
+  agents: ['Trợ lý AI', 'Agents'],
+  usage: ['Phân tích sử dụng', 'Usage'],
   dashboard: ['Tổng quan', 'Overview'],
   knowledge: ['Kho tri thức', 'Knowledge Base'],
   persona: ['Nhân cách AI', 'AI Persona'],

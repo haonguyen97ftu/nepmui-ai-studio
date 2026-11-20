@@ -1,7 +1,8 @@
-# Founder actions
+# Founder actions — NM-AI-04
 
-1. Review the NM-AI-03 changes and hosted evidence in draft PR #1 and [QA report](QA_REPORT.md). Staging D1, secrets and the Actions deployment environment already exist.
-2. Use the existing staging workflow with a full pinned feature commit SHA for subsequent evaluations. Keep production and staging database IDs and keys separate. Meta credentials are unnecessary for staging.
-3. Review Vietnamese tone and consultation relevance in the staging Playground. Select the retention period and verify the human takeover workflow before using customer data.
+1. Review the functional platform changes, security disposition, screenshots and [migration report](MIGRATION_REPORT.md) in draft PR #1. NẾP MÙI records/settings remain preserved; other workspaces are synthetic tests only.
+2. Approve the concrete staging backup, forward migration and pinned release plan in [DEPLOYMENT.md](DEPLOYMENT.md) when ready. Nothing in NM-AI-04 has changed hosted schema or the last approved NM-AI-03 staging runtime.
+3. After approval, have the existing Actions deployer preserve the founder key, provision distinct protected auth/Page keys, verify a private recovery point, apply migration and deploy. Claim the founder account once and keep its credentials in the password manager. Shared-key login then closes.
+4. Assign a dedicated staging benchmark account, update the existing workflow login/restoration steps to use account credentials and explicit workspace scope, and rerun the unchanged 13+2 checks without resetting quotas. Assess Vietnamese tone and actual authentication cost on Workers Free.
 
-Any later production release or live Meta rollout needs separate founder approval. A later Meta test requires approved Page permissions, a Page token and app secret in Cloudflare secrets, a supported Graph API version and an isolated test Page. Keep staging on mock Messenger.
+Keep live Messenger off. Page ownership verification does not authorize ingress, outbound sending, production deployment or a paid service. Those remain separate decisions. No SaaS billing or domain purchase is included.

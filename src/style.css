@@ -218,3 +218,81 @@ details p { color: var(--muted); font-size: .88rem; margin-top: 7px; }
 }
 .delivery-status { margin: 12px 0; padding: 9px; border: 1px solid var(--border); border-radius: 7px; }
 .delivery-status ul { margin: 5px 0 0; padding-inline-start: 16px; color: var(--muted); font-size: .8rem; list-style: disc; }
+
+/* AI Studio platform chrome stays neutral; brand accents are scoped to workspace content. */
+:root { --ink:#1e2935; --muted:#596773; --paper:#f5f7f9; --surface:#ffffff; --border:#dfe5e9; --olive:#235568; --olive-dark:#163f50; --olive-soft:#e8f0f3; --sand:#f3eee3; }
+h1 { font-family:"Be Vietnam Pro",system-ui,sans-serif; font-size:clamp(1.65rem,3vw,2.25rem); font-weight:600; letter-spacing:-.055em; }
+.sidebar,.topbar { background:var(--surface); }
+.logo strong { font-family:"Be Vietnam Pro",system-ui,sans-serif; font-weight:600; letter-spacing:-.04em; font-size:1.3rem; }
+.logo small { letter-spacing:.1em; font-size:.6rem; }
+.sidebar { padding-top:24px; }
+.sidebar-brand { margin-bottom:24px; }
+.workspace-selector { padding:0 4px 16px; }
+.workspace-selector label { font-size:.72rem; color:var(--muted); display:grid; gap:8px; }
+.workspace-selector select { width:100%; min-height:42px; font-weight:500; color:var(--ink); background:var(--paper); padding:8px; }
+.nav-group { margin-bottom:16px; }
+.nav-group a { min-height:40px; color:var(--muted); }
+.nav-group a:hover { background:var(--paper); }
+.workspace-theme { --olive:var(--workspace-accent,#235568); --olive-dark:color-mix(in srgb,var(--olive) 80%,black); --olive-soft:color-mix(in srgb,var(--olive) 12%,white); width:100%; }
+.workspace-theme[data-brand="nepmui"] h1 { font-family:Lora,Georgia,serif; font-weight:500; }
+.workspace-pages { min-width:0; }
+.page-fields { border:0; margin:0; padding:0; min-width:0; display:grid; gap:18px; }
+.page-fields:disabled { opacity:.88; }
+.workspace-heading { display:flex; align-items:center; gap:12px; padding-bottom:12px; border-bottom:1px solid var(--border); }
+.workspace-heading strong { display:block; font-weight:600; }
+.workspace-heading small { display:block; margin-top:4px; font-size:.75rem; }
+.workspace-avatar img { width:100%; height:100%; object-fit:contain; border-radius:6px; }
+.platform-metrics { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); background:var(--surface); border:1px solid var(--border); border-radius:10px; }
+.platform-metrics>div { padding:20px; border-right:1px solid var(--border); }
+.platform-metrics>div:last-child { border-right:0; }
+.platform-metrics small { display:block; font-size:.8rem; }
+.platform-metrics strong { display:block; margin-top:10px; font-size:1.8rem; font-weight:600; }
+.platform-metrics strong span { color:var(--muted); font-size:1rem; font-weight:400; }
+.table-scroll { overflow-x:auto; max-width:100%; margin-top:16px; }
+.platform-table { width:100%; border-collapse:collapse; text-align:left; font-size:.85rem; }
+.platform-table th { padding:12px; color:var(--muted); background:var(--paper); font-size:.72rem; font-weight:500; white-space:nowrap; }
+.platform-table td { border-bottom:1px solid var(--border); padding:16px 12px; }
+.platform-table tr:last-child td { border-bottom:0; }
+.platform-table td:nth-child(4) { white-space:nowrap; }
+.brand-cell { display:flex; gap:12px; align-items:center; }
+.brand-cell strong { display:block; font-size:.9rem; }
+.brand-cell small,.channel-list .card-heading small { display:block; margin-top:4px; font-size:.75rem; }
+.status-label { font-size:.76rem; padding:5px 8px; border:1px solid var(--border); border-radius:5px; background:var(--paper); white-space:nowrap; }
+.notice-panel { display:flex; align-items:start; gap:12px; padding:16px; border:1px solid var(--border); border-radius:8px; background:var(--surface); font-size:.85rem; line-height:1.7; }
+.notice-panel svg { flex:0 0 auto; margin-top:2px; color:var(--olive); }
+.team-list,.channel-list { display:grid; gap:0; list-style:none; margin:16px 0 0; padding:0; }
+.team-row { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:16px 0; border-bottom:1px solid var(--border); flex-wrap:wrap; }
+.team-row:last-child { border-bottom:0; }
+.team-row label { display:grid; gap:4px; font-size:.72rem; color:var(--muted); }
+.team-row select { min-width:150px; padding:8px; }
+.team-row details { max-width:100%; }
+.team-row details form { margin-top:12px; }
+.channel-list>li { padding:20px 0; border-bottom:1px solid var(--border); }
+.channel-list>li:last-child { border-bottom:0; }
+.channel-stats { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; margin:20px 0; }
+.channel-stats dt { font-size:.72rem; color:var(--muted); }
+.channel-stats dd { margin:6px 0 0; font-size:.84rem; }
+.role-guide { display:grid; grid-template-columns:160px 1fr; gap:12px; font-size:.85rem; line-height:1.7; }
+.role-guide dt { font-weight:600; }
+.role-guide dd { margin:0; color:var(--muted); }
+.text-button { color:var(--olive); font-size:.82rem; text-decoration:underline; background:none; border:0; text-align:left; padding:4px 0; }
+.setup-review { line-height:1.8; display:grid; gap:12px; }
+.onboarding form { margin-top:20px; }
+.activity-list { list-style:none; padding:0; margin:12px 0 0; }
+.activity-list li { padding:12px 0; border-bottom:1px solid var(--border); display:flex; gap:12px; justify-content:space-between; flex-wrap:wrap; font-size:.8rem; }
+@media(max-width:767px) {
+  .platform-metrics { grid-template-columns:1fr; }
+  .platform-metrics>div { border-right:0; border-bottom:1px solid var(--border); padding:16px; }
+  .platform-metrics>div:last-child { border-bottom:0; }
+  .platform-metrics strong { margin-top:6px; font-size:1.55rem; }
+  .channel-stats { grid-template-columns:1fr 1fr; }
+  .channel-list .card-heading { align-items:flex-start; flex-wrap:wrap; }
+  .team-row { align-items:flex-start; }
+  .team-row .actions { width:100%; }
+  .role-guide { grid-template-columns:1fr; gap:4px; }
+  .role-guide dd { margin-bottom:12px; }
+  .platform-table td,.platform-table th { padding:12px 8px; }
+  .workspace-heading { margin-top:4px; }
+}
+.skip:not(:focus-visible) { clip-path:inset(50%); width:1px; height:1px; overflow:hidden; padding:0; margin:-1px; }
+.skip:focus-visible { clip-path:none; width:auto; height:auto; padding:10px; margin:0; transform:translateY(0); }
