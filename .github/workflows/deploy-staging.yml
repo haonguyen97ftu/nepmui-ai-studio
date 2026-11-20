@@ -1,0 +1,102 @@
+name: Deploy Studio staging
+on:
+  workflow_dispatch:
+  push:
+    branches: [ops/nm-ai-deploy-01]
+    paths: ['.github/staging-deploy.request']
+permissions:
+  contents: read
+concurrency:
+  group: nepmui-ai-studio-staging
+  cancel-in-progress: false
+jobs:
+  deploy:
+    if: github.repository == 'haonguyen97ftu/nepmui-ai-studio' && github.ref == 'refs/heads/ops/nm-ai-deploy-01'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    environment:
+      name: nepmui-staging
+      url: https://nepmui-ai-studio-staging.haonguyen-drew.workers.dev
+    env:
+      CLOUDFLARE_ACCOUNT_ID: 3bdb3fba2669802b6102e0f1953294fe
+      STUDIO_STAGING_D1_ID: 71103118-e36b-4b55-a64d-a8f1d7974903
+      STUDIO_BENCHMARK_URL: https://nepmui-ai-studio-staging.haonguyen-drew.workers.dev
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: 51f06c4e23f1263587de0b7677e0dc4eedca1fb6
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24
+      - run: npm ci
+      - run: npm run build:staging
+      - name: Deploy reviewed staging release
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          STUDIO_BENCHMARK_ADMIN_SECRET: ${{ secrets.STAGING_ADMIN_SECRET }}
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN" || { echo "::error::Missing staging Cloudflare API token"; exit 1; }
+          [[ "$STUDIO_BENCHMARK_ADMIN_SECRET" =~ ^[a-fA-F0-9]{64}$ ]] || { echo "::error::Missing or invalid staging administrator secret"; exit 1; }
+          umask 077
+          STUDIO_STAGING_SECRETS_FILE="$(mktemp)"
+          export STUDIO_STAGING_SECRETS_FILE
+          trap 'rm -f "$STUDIO_STAGING_SECRETS_FILE"' EXIT
+          node -e 'require("node:fs").writeFileSync(process.env.STUDIO_STAGING_SECRETS_FILE, JSON.stringify({ ADMIN_SECRET: process.env.STUDIO_BENCHMARK_ADMIN_SECRET }))'
+          unset STUDIO_BENCHMARK_ADMIN_SECRET
+          npm run deploy:staging
+      - name: Verify hosted API and configure bounded Workers AI
+        env:
+          STUDIO_BENCHMARK_ADMIN_SECRET: ${{ secrets.STAGING_ADMIN_SECRET }}
+        run: |
+          node --input-type=module <<'JS'
+          import assert from 'node:assert/strict'
+          const origin = process.env.STUDIO_BENCHMARK_URL
+          let cookie
+          async function api(path, method = 'GET', payload) {
+            return fetch(origin + '/api/' + path, {
+              method,
+              redirect: 'error',
+              signal: AbortSignal.timeout(15000),
+              headers: { Origin: origin, 'Content-Type': 'application/json', ...(cookie ? { Cookie: cookie } : {}) },
+              body: payload === undefined ? undefined : JSON.stringify(payload)
+            })
+          }
+          const home = await fetch(origin, { redirect: 'error', signal: AbortSignal.timeout(15000) })
+          assert.equal(home.status, 200)
+          const signedOut = await (await api('session')).json()
+          assert.equal(signedOut.staging, true)
+          assert.equal(signedOut.authenticated, false)
+          assert.equal(signedOut.brand, undefined)
+          for (const route of ['overview', 'audit', 'knowledge', 'products', 'training', 'conversations', 'persona', 'models', 'privacy', 'integrations']) {
+            assert.equal((await api(route)).status, 401, route)
+          }
+          assert.equal((await api('webhooks/messenger')).status, 403)
+          assert.equal((await api('webhooks/messenger', 'POST', {})).status, 403)
+          const login = await api('session', 'POST', { token: process.env.STUDIO_BENCHMARK_ADMIN_SECRET })
+          assert.equal(login.status, 200, 'Administrator login')
+          const setCookie = login.headers.get('set-cookie') ?? ''
+          for (const flag of ['Secure', 'HttpOnly', 'SameSite=Strict']) assert.ok(setCookie.includes(flag), flag)
+          cookie = setCookie.split(';')[0]
+          try {
+            for (const route of ['knowledge', 'products', 'training']) assert.equal((await api(route)).status, 200, route)
+            const integrations = await (await api('integrations')).json()
+            assert.equal(integrations.messenger, false)
+            assert.equal(integrations.outbound, false)
+            const { aiEnabled, version, data } = await (await api('models')).json()
+            assert.equal(aiEnabled, true)
+            const desired = { provider: 'workers-ai', model: '@cf/meta/llama-3.3-70b-instruct-fp8-fast', dailyLimit: 20, dailyNeurons: 4000 }
+            if (Object.entries(desired).some(([key, value]) => data[key] !== value)) {
+              assert.equal((await api('models', 'PUT', { version, data: desired })).status, 200)
+            }
+            console.log('Hosted authentication, admin API, Messenger disabled and Workers AI binding verified.')
+          } finally {
+            assert.equal((await api('session', 'DELETE')).status, 200)
+            assert.equal((await api('knowledge')).status, 401, 'Revoked session')
+          }
+          JS
+      - name: Run Vietnamese Workers AI benchmark
+        env:
+          STUDIO_BENCHMARK_ADMIN_SECRET: ${{ secrets.STAGING_ADMIN_SECRET }}
+        run: npm run benchmark:staging
