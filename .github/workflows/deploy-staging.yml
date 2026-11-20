@@ -24,7 +24,7 @@ jobs:
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          ref: 9bc0668776aea9e1c27d4cbedf1d7aefc802fc61
+          ref: a9f53a72a443f5798cbdcb26815fcc37e4ee5c50
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
@@ -101,7 +101,7 @@ jobs:
             assert.equal(integrations.outbound, false)
             const { aiEnabled, version, data } = await (await api('models')).json()
             assert.equal(aiEnabled, true)
-            const desired = { provider: 'workers-ai', model: '@cf/meta/llama-3.3-70b-instruct-fp8-fast', dailyLimit: 20, dailyNeurons: 4000 }
+            const desired = { provider: 'workers-ai', model: '@cf/meta/llama-3.3-70b-instruct-fp8-fast', dailyLimit: 40, dailyNeurons: 6000 }
             if (Object.entries(desired).some(([key, value]) => data[key] !== value)) {
               assert.equal((await api('models', 'PUT', { version, data: desired })).status, 200)
             }
@@ -115,3 +115,33 @@ jobs:
         env:
           STUDIO_BENCHMARK_ADMIN_SECRET: ${{ secrets.STAGING_ADMIN_SECRET }}
         run: npm run benchmark:staging
+
+      - name: Restore standard staging inference limits
+        if: always()
+        env:
+          STUDIO_BENCHMARK_ADMIN_SECRET: ${{ secrets.STAGING_ADMIN_SECRET }}
+        run: |
+          node --input-type=module <<'JS'
+          import assert from 'node:assert/strict'
+          const origin = process.env.STUDIO_BENCHMARK_URL
+          let cookie
+          async function api(path, method = 'GET', payload) {
+            const response = await fetch(origin + '/api/' + path, {
+              method, redirect: 'error', signal: AbortSignal.timeout(15000),
+              headers: { Origin: origin, 'Content-Type': 'application/json', ...(cookie ? { Cookie: cookie } : {}) },
+              body: payload === undefined ? undefined : JSON.stringify(payload)
+            })
+            assert.ok(response.ok, `Staging limit restoration failed (HTTP ${response.status})`)
+            if (path === 'session' && method === 'POST') cookie = response.headers.get('set-cookie')?.split(';')[0]
+            return response.json()
+          }
+          await api('session', 'POST', { token: process.env.STUDIO_BENCHMARK_ADMIN_SECRET })
+          try {
+            assert.equal((await api('session')).staging, true)
+            const { data, version } = await api('models')
+            await api('models', 'PUT', { version, data: { ...data, dailyLimit: 20, dailyNeurons: 4000 } })
+            console.log('Restored staging limits to 20 calls / 4000 reserved Neurons; usage counters unchanged.')
+          } finally {
+            if (cookie) await api('session', 'DELETE')
+          }
+          JS

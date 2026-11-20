@@ -1,4 +1,6 @@
-NM-AI-03
-Run diagnostic release 9bc0668776aea9e1c27d4cbedf1d7aefc802fc61 on staging only.
-Preserve synthetic benchmark assertions and existing quota limits.
-Use full pinned SHA for checkout.
+NM-AI-03 optimized staging
+Release a9f53a72a443f5798cbdcb26815fcc37e4ee5c50.
+51 offline tests and 8 browser scenarios passed.
+Keep all original hosted assertions plus two multi-turn checks.
+Temporarily reserve at most 40 calls / 6000 Neurons; restore 20 / 4000 after run.
+No production, paid service or live Messenger.
