@@ -24,6 +24,7 @@ export const contracts = {
   training: z.object({ title: short, incorrect: optional, body: optional, status: stages, sources: z.array(sourceRef).max(8).optional() }),
   conversations: z.object({
     title: short, channel: z.enum(['playground', 'messenger', 'messenger-mock', 'instagram', 'website']),
+    channelId: z.string().max(160).optional(),
     status: z.enum(['answered', 'handover', 'resolved']), paused: z.boolean().optional(), messages: z.array(message).max(40),
   }),
 }
@@ -31,8 +32,8 @@ export type Kind = keyof typeof contracts
 export type Data<K extends Kind> = z.infer<(typeof contracts)[K]>
 export type Entry<K extends Kind> = { id: string; data: Data<K>; version: number; updated: number }
 export const settings = {
-  persona: { prompt: 'Bạn là trợ lý chăm sóc khách hàng của NẾP MÙI.', voice: 'Ấm áp, tinh tế', rules: 'Chuyển câu hỏi chưa có căn cứ cho nhân viên.', language: 'vi' },
+  persona: { prompt: 'Bạn là trợ lý chăm sóc khách hàng.', voice: 'Ấm áp, tinh tế', rules: 'Chuyển câu hỏi chưa có căn cứ cho nhân viên.', language: 'vi' },
   models: { provider: 'mock', model: models[0], dailyLimit: 0, dailyNeurons: 0 },
 } satisfies { [K in 'persona' | 'models']: Data<K> }
-export const chatInput = z.object({ question: z.string().trim().min(1).max(1000), conversationId: z.uuid().optional() })
+export const chatInput = z.object({ question: z.string().trim().min(1).max(1000), conversationId: z.uuid().optional(), channelId: z.uuid().optional(), agentId: z.uuid().optional() })
 export const conversationAction = z.object({ version: z.number().int().positive(), status: z.enum(['handover', 'resolved']), reply: optional, paused: z.boolean().optional() })

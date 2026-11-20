@@ -103,10 +103,10 @@ function budget(request: ReturnType<typeof requestFor>) {
   return Math.ceil((inputCeiling * 26668 + maxOutput * 204805) / 1_000_000)
 }
 
-function render(plan: Plan, sources: Source[], products: Product[], consult: boolean, language: 'vi' | 'en', focus: 'price' | 'stock' | 'summary') {
+function render(plan: Plan, sources: Source[], products: Product[], consult: boolean, language: 'vi' | 'en', focus: 'price' | 'stock' | 'summary', name: string) {
   const en = language === 'en'
   const lead = plan.tone === 'concise' ? '' : plan.tone === 'warm'
-    ? en ? 'Happy to help.' : 'Dạ, NẾP MÙI rất vui được hỗ trợ bạn.'
+    ? en ? 'Happy to help.' : `Dạ, ${name} rất vui được hỗ trợ bạn.`
     : en ? 'Here’s what may help.' : 'Bạn có thể tham khảo những thông tin sau.'
   const lines = products.map(product => {
     const amount = new Intl.NumberFormat(en ? 'en-US' : 'vi-VN').format(product.price) + ' ₫'
@@ -121,24 +121,26 @@ function render(plan: Plan, sources: Source[], products: Product[], consult: boo
       : `${product.title} có giá ${amount} và hiện ${availability}.${notes ? ' Tầng hương: ' + notes : ''}`
   })
   const recommendLead = consult && lines.length ? en ? 'You could consider these options.' : 'Bạn có thể cân nhắc những lựa chọn này.' : ''
-  const closing = plan.closing === 'preferences' && consult ? en ? 'Which fragrance notes do you prefer?' : 'Bạn thích nhóm hương nào để NẾP MÙI tư vấn sát hơn?'
-    : plan.closing === 'help' ? en ? 'What else can I help you with?' : 'Bạn muốn NẾP MÙI hỗ trợ thêm điều gì?' : ''
+  const closing = plan.closing === 'preferences' && consult ? en ? 'Which fragrance notes do you prefer?' : `Bạn thích nhóm hương nào để ${name} tư vấn sát hơn?`
+    : plan.closing === 'help' ? en ? 'What else can I help you with?' : `Bạn muốn ${name} hỗ trợ thêm điều gì?` : ''
   return [lead, recommendLead, ...lines, ...sources.map(source => source.body), closing].filter(Boolean).join('\n\n')
 }
 
 export async function answer(store: Studio, ai: Inference | undefined, question: string, history: string[] | Message[]) {
   const started = Date.now()
-  const [persona, config] = await Promise.all([store.setting('persona'), store.setting('models')])
+  const [persona, config, brand] = await Promise.all([store.setting('persona'), store.setting('models'),store.brand?.()])
+  const name=brand?.name??'AI Studio'
   const provider = config.provider
   const fallback = persona.language === 'en'
     ? 'I’ll pass your question to our support team for confirmation.'
-    : 'NẾP MÙI sẽ chuyển câu hỏi của bạn đến đội ngũ hỗ trợ để xác nhận.'
+    : `${name} sẽ chuyển câu hỏi của bạn đến đội ngũ hỗ trợ để xác nhận.`
   const diagnostic: Diagnostic = { code: 'not_called' }
   let sources: Source[] = []
   let products: Product[] = []
   const finish = (reason: string, text = fallback, references: SourceRef[] = [], method = 'handover') => ({
     text, reason, diagnostic, sourceId: references[0]?.id, references, sources, products, method, provider, latency: Date.now() - started,
   })
+  if (typeof store.brand==='function' && !brand) return finish('workspace_inactive')
   const normalized = normalize(question)
   if (sensitive.test(normalized) || suspicious.test(normalized) || redact(question) !== question) return finish('sensitive')
   const messages: Message[] = history.map(item => typeof item === 'string' ? { role: 'user', text: item } : item)
@@ -206,7 +208,7 @@ export async function answer(store: Studio, ai: Inference | undefined, question:
       const references = [...articles, ...facts].map(({ id, kind, title, version }) => ({ id, kind, title, version }))
       const text = render(preference && plan.closing === 'preferences' ? { ...plan, closing: 'help' } : plan, articles, facts, consult, persona.language, asksCommercial
         ? price.test(normalized) && stock.test(normalized) ? 'summary' : price.test(normalized) ? 'price' : 'stock'
-        : 'summary')
+        : 'summary', name)
       return finish('grounded', text.slice(0, 4000), references, method)
     }
     const safePlan: Plan = { abstain: false, tone: 'concise', closing: consult ? 'preferences' : 'none',

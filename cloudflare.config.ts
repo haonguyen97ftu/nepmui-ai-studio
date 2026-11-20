@@ -18,9 +18,8 @@ export default defineConfig(({ mode }) => {
         logs: { enabled: true, invocationLogs: false },
         traces: { enabled: true, headSamplingRate: 0.01 },
       },
-      triggers: [triggers.scheduled({ schedule: '15 3 * * *' }), ...(outbound || staging ? [triggers.scheduled({ schedule: '*/2 * * * *' })] : [])],
+      triggers: [triggers.scheduled({ schedule: '15 3 * * *' }), triggers.scheduled({ schedule: '*/2 * * * *' })],
       env: {
-        BRAND_ID: bindings.text('nepmui'),
         DB: bindings.d1({ id: (staging ? process.env.STUDIO_STAGING_D1_ID : process.env.STUDIO_D1_ID) || '11111111-1111-4111-8111-111111111111' }),
         AI: bindings.ai(),
         WORKERS_AI_ENABLED: bindings.text(staging || process.env.STUDIO_WORKERS_AI_ENABLED === 'true' ? 'true' : 'false'),

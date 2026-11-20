@@ -1,18 +1,24 @@
+import { connection, engineStore, registryRoutes, type Connection } from './registry'
+import { allowed, accountsExist, credentials, digest, legacyWorkspace, login, principal, throttle, audit, type Principal } from './accounts'
+import { platformRoutes } from './platform'
 import { Hono } from 'hono'
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie'
 import { z } from 'zod'
 import { answer, redact, type Inference } from './ai'
 import { channelAdapters, receiveBatch, signatureValid } from './channels'
 import { chatInput, contracts, conversationAction, type Data } from './contracts'
-import { authorized, bodyBytes, equalSecret, jsonBody, newSession, sessionAge, sessionCookie } from './security'
+import { bodyBytes, equalSecret, jsonBody, newSession, sessionAge, sessionCookie } from './security'
 import { studio, type Studio } from './store'
 import { canSend, drainMessenger } from './messenger'
-import { admitLogin, deleteThread, purge, retentionDays, revoke, revoked } from './privacy'
+import { deleteThread, purge, retentionDays, revoke } from './privacy'
 
 export type Env = {
   DB: D1Database
   AI?: Inference
-  BRAND_ID: string
+  /** Legacy transport compatibility only; never selects an authenticated workspace. */
+  BRAND_ID?: string
+  CHANNEL_ENCRYPTION_KEY?: string
+  AUTH_PEPPER?: string
   ADMIN_SECRET?: string
   META_APP_SECRET?: string
   META_VERIFY_TOKEN?: string
@@ -26,13 +32,10 @@ export type Env = {
   DEMO?: 'loopback'
 }
 
-const app = new Hono<{ Bindings: Env; Variables: { store: Studio; demo: boolean } }>()
+export type Variables = { store: Studio; demo: boolean; principal: Principal | undefined; workspaceId: string }
+const app = new Hono<{ Bindings: Env; Variables: Variables }>()
 const authCookieOptions = { path: '/', secure: true, httpOnly: true, sameSite: 'Strict' } as const
 const versionInput = z.number().int().positive()
-async function authenticated(env: Env, cookie: string | undefined) {
-  return await authorized(env.ADMIN_SECRET, env.BRAND_ID, cookie) &&
-    !await revoked(env.DB, env.BRAND_ID, cookie)
-}
 const webhooks = '/api/webhooks/messenger'
 
 app.use('/api/*', async (c, next) => {
@@ -41,39 +44,69 @@ app.use('/api/*', async (c, next) => {
   const url = new URL(c.req.url)
   const demo = c.env.DEMO === 'loopback' && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)
   c.set('demo', demo)
-  c.set('store', studio(c.env.DB, c.env.BRAND_ID))
   if (url.pathname === webhooks) return next()
   const safe = c.req.method === 'GET' || c.req.method === 'HEAD'
   if (!safe && c.req.header('Origin') !== url.origin) return c.json({ error: 'origin_denied' }, 403)
-  const publicSession = url.pathname === '/api/session' && ['GET', 'POST'].includes(c.req.method)
-  if (!publicSession && !demo && !await authenticated(c.env, getCookie(c, sessionCookie))) {
-    return c.json({ error: 'unauthorized' }, 401)
+  const user = await principal(c.env,getCookie(c,sessionCookie),demo)
+  c.set('principal',user)
+  c.set('workspaceId',user?.workspaceId ?? '')
+  c.set('store',studio(c.env.DB,user?.workspaceId ?? ''))
+  const publicSession=url.pathname==='/api/session' && ['GET','POST'].includes(c.req.method)
+  if (publicSession) return next()
+  if (!user) return c.json({ error:'unauthorized' },401)
+  if (c.req.header('X-Workspace-ID') && c.req.header('X-Workspace-ID')!==user.workspaceId) return c.json({ error:'workspace_changed' },403)
+  const globalRoute=/^\/api\/(session|bootstrap|workspaces|platform|accounts|account)(?:\/|$)/.test(url.pathname)
+  if (!globalRoute && !user.workspaceId) return c.json({ error:'workspace_required' },409)
+  const switching=/^\/api\/workspaces\/[^/]+\/switch$/.test(url.pathname)
+  if (!switching && !['/api/session','/api/bootstrap','/api/account/password'].includes(url.pathname) && !allowed(user.role,url.pathname,c.req.method)) return c.json({ error:'forbidden' },403)
+  if (!safe && (!globalRoute || (url.pathname==='/api/accounts' && c.req.method==='POST'))) {
+    const workspace=await c.env.DB.prepare('SELECT active FROM brands WHERE id=?').bind(user.workspaceId).first<{ active:number }>()
+    if (!workspace?.active) return c.json({ error:'workspace_archived' },403)
   }
   await next()
+  if (!safe && c.res.status<400 && !['/api/session','/api/bootstrap'].includes(url.pathname)) {
+    await audit(c.env.DB,user.id,c.req.method.toLowerCase()+'.'+(url.pathname.split('/')[2]??''),url.pathname.slice(0,200),user.workspaceId)
+  }
 })
 
 app.get('/api/session', async c => {
-  const demo = c.get('demo')
-  const signedIn = demo || await authenticated(c.env, getCookie(c, sessionCookie))
-  return c.json({ authenticated: signedIn, demo, staging: c.env.STUDIO_ENV === 'staging', brand: signedIn ? await c.get('store').brand() : undefined })
+  const user=c.get('principal')
+  const profile=user?.workspaceId ? await c.env.DB.prepare('SELECT logo,color,language,archived,version FROM workspace_profiles WHERE brand_id=?').bind(user.workspaceId).first() : undefined
+  const brand=user?.workspaceId ? await c.env.DB.prepare('SELECT id,name,active FROM brands WHERE id=?').bind(user.workspaceId).first() : undefined
+  return c.json({ authenticated:!!user,demo:c.get('demo'),staging:c.env.STUDIO_ENV==='staging',
+    bootstrapRequired:!!user?.legacy, user:user ? { id:user.id,email:user.email,role:user.role,superAdmin:user.superAdmin } : undefined,
+    brand:brand ? { ...brand,...profile } : undefined })
 })
 app.post('/api/session', async c => {
-  const { ADMIN_SECRET: secret, DB, BRAND_ID } = c.env
-  if (!secret || secret.length < 32) return c.json({ error: 'unauthorized' }, 401)
-  if (!await admitLogin(DB, BRAND_ID, secret, c.req.header('CF-Connecting-IP') ?? 'direct')) {
-    c.header('Retry-After', '600')
-    return c.json({ error: 'login_limit' }, 429)
+  const secret=c.env.ADMIN_SECRET
+  if (!secret || secret.length<32) return c.json({ error:'unauthorized' },401)
+  const input=z.union([z.object({ token:z.string().max(512) }),credentials]).parse(await jsonBody(c.req.raw))
+  const address=c.req.header('CF-Connecting-IP')??'direct'
+  const admitted=await throttle(c.env.DB,secret,'ip:'+address,20)
+  const accountAdmitted=await throttle(c.env.DB,secret,'login:'+('email' in input ? input.email : 'bootstrap')+':'+address,5)
+  if (!admitted || !accountAdmitted) { c.header('Retry-After','600'); return c.json({ error:'login_limit' },429) }
+  let token:string|undefined
+  if ('token' in input) {
+    if (!await accountsExist(c.env.DB) && await equalSecret(input.token,secret)) token=await newSession(secret,legacyWorkspace)
+  } else {
+    // Independent account bucket prevents distributed guesses against one account.
+    if (!await throttle(c.env.DB,secret,'account:'+input.email,10)) return c.json({ error:'login_limit' },429)
+    token=await login(c.env,input.email,input.password)
   }
-  const { token } = z.object({ token: z.string().max(512) }).parse(await jsonBody(c.req.raw))
-  if (!await equalSecret(token, secret)) return c.json({ error: 'unauthorized' }, 401)
-  setCookie(c, sessionCookie, await newSession(secret, c.env.BRAND_ID), { ...authCookieOptions, maxAge: sessionAge })
-  return c.json({ ok: true })
+  if (!token) return c.json({ error:'unauthorized' },401)
+  setCookie(c,sessionCookie,token,{ ...authCookieOptions,maxAge:sessionAge })
+  return c.json({ ok:true })
 })
 app.delete('/api/session', async c => {
-  await revoke(c.env.DB, c.env.BRAND_ID, getCookie(c, sessionCookie))
+  const token=getCookie(c,sessionCookie)
+  if (token && /^[a-f0-9]{64}$/.test(token)) await c.env.DB.prepare('DELETE FROM account_sessions WHERE token_hash=?').bind(await digest(token)).run()
+  else await revoke(c.env.DB,legacyWorkspace,token)
   deleteCookie(c, sessionCookie, authCookieOptions)
   return c.json({ ok: true })
 })
+
+platformRoutes(app)
+registryRoutes(app)
 
 const modeInput = z.enum(['test', 'live'])
 app.get('/api/overview', async c => {
@@ -82,7 +115,10 @@ app.get('/api/overview', async c => {
   const mode = modeInput.parse(c.req.query('mode') ?? (c.get('demo') ? 'test' : 'live'))
   return c.json(await c.get('store').overview(now.toISOString().slice(0, 10), since, mode))
 })
-app.get('/api/audit', async c => c.json(await c.get('store').audit()))
+app.get('/api/audit', async c => {
+  const attributed=(await c.env.DB.prepare('SELECT id,action,target,actor,at FROM platform_audit WHERE brand_id=? ORDER BY at DESC LIMIT 50').bind(c.get('workspaceId')).all<{id:string;action:string;target:string;actor:string;at:number}>()).results
+  return c.json([...(await c.get('store').audit()),...attributed.map(row=>({...row,kind:'access'}))].sort((a,b)=>Number(b.at)-Number(a.at)).slice(0,100))
+})
 app.patch('/api/brand', async c => {
   const { name } = z.object({ name: z.string().trim().min(1).max(80) }).parse(await jsonBody(c.req.raw))
   await c.get('store').rename(name)
@@ -115,6 +151,7 @@ for (const kind of ['knowledge', 'products', 'training'] as const) {
     const store = c.get('store')
     const current = await store.get(kind, c.req.param('id'))
     if (!current) return c.json({ error: 'missing' }, 404)
+    if (c.get('principal')?.role==='ai-trainer' && 'status' in data && data.status!=='draft') return c.json({ error:'forbidden' },403)
     if ('status' in data && 'status' in current.data) {
       const { status: previous, ...before } = current.data
       const { status: next, ...after } = data
@@ -155,6 +192,7 @@ app.post('/api/knowledge/import', async c => {
   return c.json({ count: items.length }, 201)
 })
 app.post('/api/training/:id/publish', async c => {
+  if (!['super-admin','brand-admin'].includes(c.get('principal')!.role)) return c.json({ error:'forbidden' },403)
   const { version } = z.object({ version: versionInput }).parse(await jsonBody(c.req.raw))
   const store = c.get('store')
   const entry = await store.get('training', c.req.param('id'))
@@ -183,14 +221,16 @@ for (const kind of ['persona', 'models'] as const) {
 
 app.post('/api/playground', async c => {
   const input = chatInput.parse(await jsonBody(c.req.raw))
-  const store = c.get('store')
+  let store:Studio
+  try { store=await engineStore(c.env.DB,c.get('workspaceId'),input.channelId,input.agentId) }
+  catch { return c.json({ error:'missing' },404) }
   const previous = input.conversationId ? await store.get('conversations', input.conversationId) : undefined
-  if (input.conversationId && previous?.data.channel !== 'playground') return c.json({ error: 'missing' }, 404)
+  if (input.conversationId && (previous?.data.channel !== 'playground' || previous.data.channelId!==input.channelId)) return c.json({ error: 'missing' }, 404)
   const history = previous?.data.messages ?? []
   const result = await answer(store, c.env.WORKERS_AI_ENABLED === 'true' ? c.env.AI : undefined, input.question,
     history)
   const data: Data<'conversations'> = {
-    title: previous?.data.title ?? input.question.slice(0, 160), channel: 'playground',
+    title: previous?.data.title ?? input.question.slice(0, 160), channel: 'playground', channelId:input.channelId,
     status: result.reason === 'grounded' && previous?.data.status !== 'handover' ? 'answered' : 'handover',
     messages: [...history, { role: 'user' as const, text: input.question }, {
       role: 'assistant' as const, text: result.text, reason: result.reason, latency: result.latency, provider: result.provider, sources: result.references,
@@ -206,7 +246,7 @@ app.get('/api/conversations/:id', async c => {
   const item = await c.get('store').get('conversations', c.req.param('id'))
   if (!item) return c.json({ error: 'missing' }, 404)
   const delivery = await c.env.DB.prepare(`SELECT state, attempts, received FROM messenger_outbox
-    WHERE brand_id=? AND thread_id=? ORDER BY received DESC LIMIT 20`).bind(c.env.BRAND_ID, item.id).all()
+    WHERE brand_id=? AND thread_id=? ORDER BY received DESC LIMIT 20`).bind(c.get('workspaceId'), item.id).all()
   return c.json({ item, delivery: delivery.results })
 })
 app.patch('/api/conversations/:id', async c => {
@@ -223,7 +263,7 @@ app.patch('/api/conversations/:id', async c => {
 
 app.delete('/api/conversations/:id', async c => {
   const version = z.coerce.number().int().positive().parse(c.req.query('version'))
-  return await deleteThread(c.env.DB, c.env.BRAND_ID, c.req.param('id'), version)
+  return await deleteThread(c.env.DB, c.get('workspaceId'), c.req.param('id'), version)
     ? c.json({ ok: true }) : c.json({ error: 'conflict' }, 409)
 })
 app.post('/api/conversations/:id/training', async c => {
@@ -239,24 +279,36 @@ app.post('/api/conversations/:id/training', async c => {
     incorrect: redact(last?.text ?? ''), body: '', status: 'draft', sources: last?.sources })
   return c.json(await store.create('training', data), 201)
 })
-app.get('/api/privacy', async c => c.json({ days: await retentionDays(c.env.DB, c.env.BRAND_ID) }))
+app.get('/api/privacy', async c => c.json({ days: await retentionDays(c.env.DB, c.get('workspaceId')) }))
 app.put('/api/privacy', async c => {
   const { days } = z.object({ days: z.number().int().min(1).max(365) }).parse(await jsonBody(c.req.raw))
   await c.env.DB.prepare('INSERT INTO retention VALUES (?,?) ON CONFLICT(brand_id) DO UPDATE SET days=excluded.days')
-    .bind(c.env.BRAND_ID, days).run()
+    .bind(c.get('workspaceId'), days).run()
   return c.json({ days })
 })
-app.post('/api/privacy/purge', async c => c.json({ count: await purge(c.env.DB, c.env.BRAND_ID) }))
+app.post('/api/privacy/purge', async c => c.json({ count: await purge(c.env.DB, c.get('workspaceId')) }))
 
 app.get('/api/integrations', c => c.json({
   messenger: c.env.STUDIO_ENV !== 'staging' && c.env.MESSENGER_INGEST === 'true' && !!(c.env.META_PAGE_ID && c.env.META_APP_SECRET && c.env.META_VERIFY_TOKEN),
   outbound: canSend(c.env),
 }))
 app.post('/api/integrations/messenger/mock', async c => {
-  const items = channelAdapters.messenger.decode(await jsonBody(c.req.raw), '100')
-  const accepted = await receiveBatch(c.env.DB, c.env.BRAND_ID, 'messenger-mock', items, true)
-  const sent = await drainMessenger(c.env, 'messenger-mock')
-  return c.json({ accepted, duplicate: items.length - accepted, sent })
+  const payload=await jsonBody(c.req.raw)
+  const items=channelAdapters.messenger.decode(payload,'100')
+  const brand=c.get('workspaceId')
+  const accepted=await receiveBatch(c.env.DB,brand,'messenger-mock',items,true)
+  const sent=await drainMessenger({ ...c.env,BRAND_ID:brand },'messenger-mock')
+  return c.json({ accepted,duplicate:items.length-accepted,sent })
+})
+app.post('/api/channels/:id/mock',async c=>{
+  const brand=c.get('workspaceId'),registered=await connection(c.env.DB,brand,c.req.param('id'))
+  if (!registered || registered.kind!=='messenger' || !registered.mock) return c.json({ error:'missing' },404)
+  if (registered.state!=='connected' || registered.paused) return c.json({ error:'channel_paused' },409)
+  const items=channelAdapters.messenger.decode(await jsonBody(c.req.raw),registered.external_id)
+  const accepted=await receiveBatch(c.env.DB,brand,'messenger-mock',items,true,registered.id)
+  if (accepted) await c.env.DB.prepare('UPDATE channels SET last_event=? WHERE brand_id=? AND id=?').bind(Date.now(),brand,registered.id).run()
+  const sent=await drainMessenger({ ...c.env,BRAND_ID:brand },'messenger-mock',2,fetch,registered.id)
+  return c.json({ accepted,duplicate:items.length-accepted,sent })
 })
 app.get(webhooks, async c => {
   const token = c.env.META_VERIFY_TOKEN
@@ -268,12 +320,24 @@ app.get(webhooks, async c => {
   return c.text(challenge)
 })
 app.post(webhooks, async c => {
-  const { META_APP_SECRET, META_PAGE_ID, MESSENGER_INGEST, DB, BRAND_ID } = c.env
-  if (c.env.STUDIO_ENV === 'staging' || MESSENGER_INGEST !== 'true' || !META_APP_SECRET || !META_PAGE_ID) return c.text('Forbidden', 403)
-  const bytes = await bodyBytes(c.req.raw, 48_000)
-  if (!await signatureValid(META_APP_SECRET, bytes, c.req.header('X-Hub-Signature-256') ?? '')) return c.text('Forbidden', 403)
-  const events = channelAdapters.messenger.decode(JSON.parse(new TextDecoder().decode(bytes)), META_PAGE_ID)
-  await receiveBatch(DB, BRAND_ID, 'messenger', events, canSend(c.env))
+  const { META_APP_SECRET,MESSENGER_INGEST,DB }=c.env
+  if (c.env.STUDIO_ENV==='staging' || MESSENGER_INGEST!=='true' || !META_APP_SECRET) return c.text('Forbidden',403)
+  const bytes=await bodyBytes(c.req.raw,48000)
+  if (!await signatureValid(META_APP_SECRET,bytes,c.req.header('X-Hub-Signature-256')??'')) return c.text('Forbidden',403)
+  const payload=JSON.parse(new TextDecoder().decode(bytes))
+  const pages=z.object({ object:z.literal('page'),entry:z.array(z.object({ id:z.string().max(100) }).passthrough()).max(10) }).parse(payload)
+  for (const page of new Set(pages.entry.map(entry=>entry.id))) {
+    const registered=await DB.prepare(`SELECT c.* FROM channels c JOIN brands b ON b.id=c.brand_id
+      WHERE c.kind='messenger' AND c.external_id=? AND c.mock=0 AND c.verified=1 AND c.token_cipher IS NOT NULL AND c.state='connected' AND c.paused=0 AND b.active=1`).bind(page).first<Connection>()
+    const events=channelAdapters.messenger.decode(payload,page)
+    if (registered) {
+      const accepted=await receiveBatch(DB,registered.brand_id,'messenger',events,true,registered.id)
+      if (accepted) await DB.prepare('UPDATE channels SET last_event=? WHERE id=?').bind(Date.now(),registered.id).run()
+    } else if (!await accountsExist(DB) && page===c.env.META_PAGE_ID && !await DB.prepare('SELECT 1 FROM channels LIMIT 1').first()) {
+      // Temporary compatibility for the unmigrated, unclaimed founder environment only.
+      await receiveBatch(DB,legacyWorkspace,'messenger',events,canSend(c.env))
+    }
+  }
   return c.text('EVENT_RECEIVED')
 })
 
@@ -286,9 +350,32 @@ app.notFound(c => c.json({ error: 'missing' }, 404))
 
 export default {
   fetch: app.fetch,
-  async scheduled(controller: ScheduledController, env: Env) {
-    if (controller.cron === '15 3 * * *') await purge(env.DB, env.BRAND_ID)
-    else if (env.STUDIO_ENV === 'staging') await drainMessenger(env, 'messenger-mock')
-    else if (canSend(env)) await drainMessenger(env, 'messenger')
+  async scheduled(_controller: ScheduledController, env: Env) {
+    // One workspace retention batch and one Page per tick keep Free-plan DB work bounded.
+    // Durable cursors rotate fairly instead of restarting at the first workspace/Page.
+    const nextWorkspace=await env.DB.prepare(`SELECT id FROM brands ORDER BY
+      (id>coalesce((SELECT cursor FROM scheduler_cursors WHERE name='retention'),'')) DESC,id LIMIT 1`).first<{id:string}>()
+    if (nextWorkspace) {
+      await purge(env.DB,nextWorkspace.id)
+      await env.DB.prepare("INSERT INTO scheduler_cursors VALUES ('retention',?) ON CONFLICT(name) DO UPDATE SET cursor=excluded.cursor").bind(nextWorkspace.id).run()
+    }
+    const page=await env.DB.prepare(`SELECT * FROM (
+      SELECT c.id cursor_id,c.id,c.brand_id,c.mock FROM channels c JOIN brands b ON b.id=c.brand_id
+      WHERE b.active=1 AND c.kind='messenger' AND c.state='connected' AND c.paused=0 AND (c.mock=1 OR c.verified=1) AND (?=0 OR c.mock=1)
+      AND EXISTS(SELECT 1 FROM messenger_outbox o WHERE o.brand_id=c.brand_id AND o.connection_id=c.id AND o.state IN ('queued','retry','working','sending') AND o.due<=?)
+      UNION ALL
+      SELECT 'legacy-mock:'||b.id,NULL,b.id,1 FROM brands b WHERE b.active=1 AND EXISTS(
+        SELECT 1 FROM messenger_outbox o WHERE o.brand_id=b.id AND o.connection_id IS NULL AND o.channel='messenger-mock' AND o.state IN ('queued','retry','working','sending') AND o.due<=?)
+      ) ORDER BY (cursor_id>coalesce((SELECT cursor FROM scheduler_cursors WHERE name='delivery'),'')) DESC,cursor_id LIMIT 1`)
+      .bind(Number(env.STUDIO_ENV==='staging'),Date.now(),Date.now()).first<{cursor_id:string;id:string|null;brand_id:string;mock:number}>()
+    if (page) {
+      await drainMessenger({ ...env,BRAND_ID:page.brand_id },page.mock ? 'messenger-mock' : 'messenger',1,fetch,page.id??undefined)
+      await env.DB.prepare("INSERT INTO scheduler_cursors VALUES ('delivery',?) ON CONFLICT(name) DO UPDATE SET cursor=excluded.cursor").bind(page.cursor_id).run()
+    }
+    await env.DB.batch([
+      env.DB.prepare('DELETE FROM account_sessions WHERE expires<=?').bind(Date.now()),
+      env.DB.prepare('DELETE FROM platform_login_attempts WHERE expires<=?').bind(Date.now()),
+      env.DB.prepare("DELETE FROM inference_reservations WHERE day<date('now','-7 days')"),
+    ])
   },
 }

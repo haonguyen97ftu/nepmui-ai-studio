@@ -50,23 +50,25 @@ export async function signatureValid(secret: string, bytes: Uint8Array<ArrayBuff
   return crypto.subtle.verify('HMAC', key, expected, bytes)
 }
 
-export async function receiveBatch(db: D1Database, brand: string, channel: ChannelAdapter['channel'], events: Inbound[], queue: boolean) {
+export async function receiveBatch(db: D1Database, brand: string, channel: ChannelAdapter['channel'], events: Inbound[], queue: boolean, connectionId?: string) {
   if (!events.length) return 0
+  const scope=connectionId ? channel+'/'+connectionId : channel
   const now = Date.now()
   const batch = crypto.randomUUID()
   const firstById = new Map<string, Inbound>()
   for (const event of events) if (!firstById.has(event.id)) firstById.set(event.id, event)
   const input = JSON.stringify([...firstById.values()].map(({ id, sender, text, timestamp }) => ({
-    id, sender, text, thread: channel + ':' + sender, received: timestamp ?? (channel === 'messenger-mock' ? now : 0),
+    id, sender, text, thread: scope + ':' + sender, received: timestamp ?? (channel === 'messenger-mock' ? now : 0),
   })))
   const accepted = `SELECT CAST(event.key AS INTEGER) seq, event.value payload, d.thread_id
     FROM json_each(?) event JOIN deliveries d ON d.brand_id=? AND d.channel=?
       AND d.external_id=json_extract(event.value,'$.id') AND d.batch_key=?`
-  const batchArgs = [input, brand, channel, batch]
+  const batchArgs = [input, brand, scope, batch]
   const work = [
     db.prepare(`INSERT INTO deliveries (brand_id,channel,external_id,at,thread_id,batch_key)
-      SELECT ?,?,json_extract(value,'$.id'),?,json_extract(value,'$.thread'),? FROM json_each(?) WHERE 1
-      ON CONFLICT DO NOTHING RETURNING external_id`).bind(brand, channel, now, batch, input),
+      SELECT ?,?,json_extract(value,'$.id'),?,json_extract(value,'$.thread'),? FROM json_each(?) WHERE EXISTS(SELECT 1 FROM brands WHERE id=? AND active=1)
+      AND (? IS NULL OR EXISTS(SELECT 1 FROM channels WHERE brand_id=? AND id=? AND state='connected' AND paused=0 AND mock=? AND (mock=1 OR verified=1)))
+      ON CONFLICT DO NOTHING RETURNING external_id`).bind(brand, scope, now, batch, input,brand,connectionId??null,brand,connectionId??null,Number(channel==='messenger-mock')),
     db.prepare(`WITH accepted AS (${accepted}),
       ordered AS (
         SELECT *,row_number() OVER (PARTITION BY thread_id ORDER BY seq DESC) position FROM accepted
@@ -76,7 +78,7 @@ export async function receiveBatch(db: D1Database, brand: string, channel: Chann
       )
       INSERT INTO records (brand_id,kind,id,data,updated)
       SELECT ?, 'conversations', thread_id,
-        json_object('title',substr(json_extract(messages,'$[0].text'),1,160),'channel',?,'status','handover','messages',json(messages)), ?
+        json_patch(json_object('title',substr(json_extract(messages,'$[0].text'),1,160),'channel',?,'status','handover','messages',json(messages)),json(?)), ?
       FROM grouped WHERE 1
       ON CONFLICT (brand_id,kind,id) DO UPDATE SET updated=excluded.updated,version=version+1,
       data=json_set(records.data,'$.status','handover','$.messages',
@@ -86,15 +88,15 @@ export async function receiveBatch(db: D1Database, brand: string, channel: Chann
             UNION ALL
             SELECT 40+CAST(key AS INTEGER),value FROM json_each(excluded.data,'$.messages')
           ) ORDER BY position DESC LIMIT 40
-        ))))`).bind(...batchArgs, brand, channel, now),
+        ))))`).bind(...batchArgs, brand, channel, JSON.stringify(connectionId ? { channelId:connectionId } : {}), now),
   ]
   if (queue) work.push(db.prepare(`WITH accepted AS (${accepted})
-    INSERT INTO messenger_outbox (brand_id,channel,external_id,thread_id,recipient,question,received,due)
+    INSERT INTO messenger_outbox (brand_id,channel,external_id,thread_id,recipient,question,received,due,connection_id)
     SELECT ?,?,json_extract(payload,'$.id'),thread_id,json_extract(payload,'$.sender'),json_extract(payload,'$.text'),
-      json_extract(payload,'$.received'),? FROM accepted a WHERE EXISTS (
+      json_extract(payload,'$.received'),?,? FROM accepted a WHERE EXISTS (
         SELECT 1 FROM records r,json_each(r.data,'$.messages') message
         WHERE r.brand_id=? AND r.kind='conversations' AND r.id=a.thread_id
           AND json_extract(message.value,'$.outboundId')=json_extract(a.payload,'$.id')
-      ) ON CONFLICT DO NOTHING`).bind(...batchArgs, brand, channel, now, brand))
+      ) ON CONFLICT DO NOTHING`).bind(...batchArgs, brand, scope, now, connectionId??null, brand))
   return (await db.batch(work))[0].results.length
 }

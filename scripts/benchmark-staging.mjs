@@ -1,8 +1,9 @@
 import { readFile } from 'node:fs/promises'
 
-const { STUDIO_BENCHMARK_URL, STUDIO_BENCHMARK_ADMIN_SECRET } = process.env
-if (!STUDIO_BENCHMARK_URL || !STUDIO_BENCHMARK_ADMIN_SECRET) {
-  throw new Error('Set STUDIO_BENCHMARK_URL and STUDIO_BENCHMARK_ADMIN_SECRET in a private staging shell.')
+const { STUDIO_BENCHMARK_URL, STUDIO_BENCHMARK_ADMIN_SECRET, STUDIO_BENCHMARK_EMAIL, STUDIO_BENCHMARK_PASSWORD, STUDIO_BENCHMARK_WORKSPACE } = process.env
+const accountMode=!!(STUDIO_BENCHMARK_EMAIL && STUDIO_BENCHMARK_PASSWORD)
+if (!STUDIO_BENCHMARK_URL || (!accountMode && !STUDIO_BENCHMARK_ADMIN_SECRET) || (accountMode && !STUDIO_BENCHMARK_WORKSPACE)) {
+  throw new Error('Set the staging URL and private benchmark credentials. Account mode also requires the authorized workspace ID.')
 }
 const host = new URL(STUDIO_BENCHMARK_URL)
 if (host.protocol !== 'https:' || !/^nepmui-ai-studio-staging\.[\w-]+\.workers\.dev$/.test(host.hostname)) {
@@ -10,11 +11,11 @@ if (host.protocol !== 'https:' || !/^nepmui-ai-studio-staging\.[\w-]+\.workers\.
 }
 const fixture = JSON.parse(await readFile(new URL('../tests/fixtures/evaluation.json', import.meta.url), 'utf8'))
 const cleanup = []
-let cookie
+let cookie,workspaceScope
 async function api(path, method = 'GET', payload) {
   const response = await fetch(new URL('/api/' + path, host), {
     method, redirect: 'error', signal: AbortSignal.timeout(60000),
-    headers: { Origin: host.origin, 'Content-Type': 'application/json', ...(cookie ? { Cookie: cookie } : {}) },
+    headers: { Origin: host.origin, 'Content-Type': 'application/json', ...(cookie ? { Cookie: cookie } : {}),...(workspaceScope && path!=='session'?{'X-Workspace-ID':workspaceScope}:{}) },
     body: payload === undefined ? undefined : JSON.stringify(payload),
   })
   if (!response.ok) throw new Error(`Staging request failed (${method} ${path.split('/')[0]}, HTTP ${response.status}).`)
@@ -22,8 +23,12 @@ async function api(path, method = 'GET', payload) {
   return response.json()
 }
 try {
-  await api('session', 'POST', { token: STUDIO_BENCHMARK_ADMIN_SECRET })
-  if (!(await api('session')).staging) throw new Error('The session does not identify this Worker as staging.')
+  await api('session', 'POST', accountMode ? {email:STUDIO_BENCHMARK_EMAIL,password:STUDIO_BENCHMARK_PASSWORD} : { token: STUDIO_BENCHMARK_ADMIN_SECRET })
+  if (accountMode) await api('workspaces/'+encodeURIComponent(STUDIO_BENCHMARK_WORKSPACE)+'/switch','POST')
+  const session=await api('session')
+  if (accountMode && session.brand?.id!==STUDIO_BENCHMARK_WORKSPACE) throw new Error('Benchmark workspace mismatch.')
+  workspaceScope=accountMode?STUDIO_BENCHMARK_WORKSPACE:undefined
+  if (!session.staging) throw new Error('The session does not identify this Worker as staging.')
   const model = await api('models')
   if (model.data.provider !== 'workers-ai' || model.data.dailyLimit < fixture.cases.length || model.data.dailyNeurons === 0) {
     throw new Error('Configure Workers AI and enough remaining staging budget for this fixture before running the benchmark.')

@@ -4,7 +4,7 @@ import { brands, records, revisions } from './schema'
 import { settings, type Data, type Entry, type Kind } from './contracts'
 import { matchExpression, retrievalExpression } from './retrieval'
 
-export function studio(binding: D1Database, brand: string) {
+export function studio(binding: D1Database, brand: string, context: { channelId?: string; persona?: Data<'persona'>; model?: Data<'models'>['model'] } = {}) {
   const db = drizzle(binding)
   const scope = (kind: Kind) => and(eq(records.brand, brand), eq(records.kind, kind))
   const key = (kind: Kind, id: string) => and(scope(kind), eq(records.id, id))
@@ -30,7 +30,10 @@ export function studio(binding: D1Database, brand: string) {
     },
     get,
     async setting<K extends 'models' | 'persona'>(kind: K): Promise<Data<K>> {
-      return (await get(kind, 'config'))?.data ?? settings[kind] as Data<K>
+      const data = (await get(kind, 'config'))?.data ?? settings[kind] as Data<K>
+      if (kind==='persona' && context.persona) return context.persona as Data<K>
+      if (kind==='models' && context.model) return { ...data,model:context.model } as Data<K>
+      return data
     },
     async list<K extends Kind>(kind: K, search = '', offset = 0, status?: string, mode?: 'test' | 'live') {
       const terms = matchExpression(search)
@@ -72,12 +75,18 @@ export function studio(binding: D1Database, brand: string) {
     },
     audit: () => db.select().from(revisions).where(eq(revisions.brand, brand)).orderBy(desc(revisions.at), revisions.id).limit(50),
     async reserve(day: string, callLimit: number, neuronLimit: number, estimate: number) {
-      const result = await binding.prepare(
-        `INSERT INTO usage (brand_id,day,calls,reserved_neurons) SELECT ?,?,1,? WHERE ?>0 AND ?<=?
-        ON CONFLICT(brand_id,day) DO UPDATE SET calls=calls+1, reserved_neurons=reserved_neurons+excluded.reserved_neurons
-        WHERE calls<? AND reserved_neurons+excluded.reserved_neurons<=?`,
-      ).bind(brand, day, estimate, callLimit, estimate, neuronLimit, callLimit, neuronLimit).run()
-      return result.meta.changes === 1
+      // A single serialized D1 statement plus trigger reserves all three counters.
+      // Each workspace is capped at half the account allocation, including channel overrides.
+      const result = await binding.prepare(`INSERT INTO inference_reservations(brand_id,channel_id,day,neurons)
+        SELECT ?,?,?,? FROM platform_limits p WHERE p.id=1 AND ?>0 AND ?>=0
+        AND EXISTS(SELECT 1 FROM brands WHERE id=? AND active=1)
+        AND coalesce((SELECT calls FROM usage WHERE brand_id=? AND day=?),0)<min(?,p.calls/2)
+        AND coalesce((SELECT reserved_neurons FROM usage WHERE brand_id=? AND day=?),0)+?<=min(?,p.neurons/2)
+        AND coalesce((SELECT calls FROM platform_usage WHERE day=?),0)<p.calls
+        AND coalesce((SELECT neurons FROM platform_usage WHERE day=?),0)+?<=p.neurons RETURNING id`)
+        .bind(brand,context.channelId??'playground',day,estimate,callLimit,estimate,brand,
+          brand,day,callLimit,brand,day,estimate,neuronLimit,day,day,estimate).all()
+      return result.results.length===1
     },
     async retrieve<K extends 'products' | 'knowledge'>(kind: K, query: string, browse = false) {
       const terms = retrievalExpression(query)

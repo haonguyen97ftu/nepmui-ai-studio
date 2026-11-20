@@ -30,7 +30,7 @@ export async function authorized(secret: string | undefined, brand: string, valu
   return equalSecret(await signature(secret, `${brand}:${parts[1]}.${parts[2]}`), parts[3])
 }
 
-export async function bodyBytes(request: Request, limit = 160_000) {
+export async function bodyBytes(request: Pick<Request,'body'>, limit = 160_000) {
   const reader = request.body?.getReader()
   const chunks: Uint8Array[] = []
   let size = 0

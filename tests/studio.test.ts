@@ -171,9 +171,10 @@ describe('brand and model settings', () => {
     expect((await request('brand', 'PATCH', { name })).status).toBe(200)
     expect(await (await request('session')).json()).toMatchObject({ brand: { name }, demo: false })
     const persona = { prompt: 'Support the simulated studio.', voice: 'Warm', rules: 'Escalate uncertain answers.', language: 'en' }
-    expect((await request('persona', 'PUT', { data: persona, version: 0 })).status).toBe(200)
-    expect(await (await request('persona')).json()).toMatchObject({ data: persona, version: 1 })
-    expect((await request('persona', 'PUT', { data: persona, version: 0 })).status).toBe(409)
+    const before = await (await request('persona')).json() as { version: number }
+    expect((await request('persona', 'PUT', { data: persona, version: before.version })).status).toBe(200)
+    expect(await (await request('persona')).json()).toMatchObject({ data: persona, version: before.version + 1 })
+    expect((await request('persona', 'PUT', { data: persona, version: before.version })).status).toBe(409)
     expect((await request('models', 'PUT', {
       data: { provider: 'workers-ai', model: models[0], dailyLimit: 2, dailyNeurons: 100 }, version: 0,
     })).status).toBe(409)

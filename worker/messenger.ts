@@ -1,3 +1,4 @@
+import { connection, decryptToken, engineStore, tokenScope } from './registry'
 import { answer } from './ai'
 import type { Env } from './index'
 import { studio } from './store'
@@ -33,26 +34,37 @@ export async function sendMessenger(env: Env, recipient: string, text: string, f
   }
 }
 
-export async function drainMessenger(env: Env, channel: Channel, limit = 2, fetcher = fetch) {
+export async function drainMessenger(env: Env, channel: Channel, limit = 2, fetcher = fetch, connectionId?: string) {
   const mock = channel === 'messenger-mock'
+  const { DB:db }=env,brand=env.BRAND_ID??'nepmui'
+  if (!await db.prepare('SELECT 1 FROM brands WHERE id=? AND active=1').bind(brand).first()) return 0
+  const registered=connectionId ? await connection(db,brand,connectionId) : undefined
+  if (connectionId && (!registered || registered.state!=='connected' || registered.paused || !!registered.mock!==mock)) return 0
+  if (registered && !mock) {
+    if (!registered.verified) return 0
+    if (env.STUDIO_ENV==='staging' || env.MESSENGER_INGEST!=='true' || env.MESSENGER_OUTBOUND!=='true' || !registered.token_cipher) return 0
+    let token:string
+    try { token=await decryptToken(env.CHANNEL_ENCRYPTION_KEY,registered.token_cipher,tokenScope(registered)) } catch { return 0 }
+    env={ ...env,META_PAGE_ID:registered.external_id,META_PAGE_TOKEN:token }
+  }
   if (!mock && !canSend(env)) return 0
-  const { DB: db, BRAND_ID: brand } = env
-  const store = studio(db, brand)
+  const scope=connectionId ? channel+'/'+connectionId : channel
+  const store=registered ? await engineStore(db,brand,registered.id) : studio(db,brand)
   const current = Date.now()
   const jobs = (await db.batch([
     db.prepare(`UPDATE messenger_outbox SET state=CASE WHEN state='sending' THEN 'unknown' ELSE 'failed' END,
       question='', recipient='' WHERE brand_id=? AND channel=? AND due<=? AND
-      (state='sending' OR (state='working' AND attempts>=4))`).bind(brand, channel, current),
+      (state='sending' OR (state='working' AND attempts>=4))`).bind(brand, scope, current),
     db.prepare(`SELECT external_id,thread_id,recipient,question,received,attempts FROM messenger_outbox AS j
       WHERE brand_id=? AND channel=? AND state IN ('queued','retry','working') AND due<=?
       AND NOT EXISTS (SELECT 1 FROM messenger_outbox older WHERE older.brand_id=j.brand_id AND older.channel=j.channel
         AND older.thread_id=j.thread_id AND older.state IN ('queued','retry','working','sending')
         AND (older.received,older.external_id)<(j.received,j.external_id))
-      ORDER BY received,external_id LIMIT ?`).bind(brand, channel, current, limit),
+      ORDER BY received,external_id LIMIT ?`).bind(brand, scope, current, limit),
   ]))[1].results as Job[]
   let sent = 0
   for (const job of jobs) {
-    const key = [brand, channel, job.external_id]
+    const key = [brand, scope, job.external_id]
     const claim = await db.prepare(`UPDATE messenger_outbox SET state='working',due=?,attempts=attempts+1
       WHERE brand_id=? AND channel=? AND external_id=? AND due<=? AND state IN ('queued','retry','working') RETURNING attempts`)
       .bind(current + leaseMs, ...key, current).first<{ attempts: number }>()
@@ -89,11 +101,13 @@ export async function drainMessenger(env: Env, channel: Channel, limit = 2, fetc
       WHERE brand_id=? AND channel=? AND external_id=? AND state='working' AND attempts=?
         AND EXISTS (SELECT 1 FROM records WHERE brand_id=? AND kind='conversations' AND id=? AND version=?
           AND coalesce(json_extract(data,'$.paused'),0)=0)
+        AND EXISTS(SELECT 1 FROM brands WHERE id=? AND active=1)
+        AND (? IS NULL OR EXISTS(SELECT 1 FROM channels WHERE brand_id=? AND id=? AND state='connected' AND paused=0 AND version=? AND (mock=1 OR verified=1)))
         AND NOT EXISTS (SELECT 1 FROM json_each(?) ref WHERE NOT EXISTS
           (SELECT 1 FROM records r WHERE r.brand_id=? AND r.kind=json_extract(ref.value,'$.kind')
             AND r.id=json_extract(ref.value,'$.id') AND r.version=json_extract(ref.value,'$.version')))
         RETURNING external_id`)
-      .bind(Date.now() + leaseMs, ...key, claim.attempts, brand, thread.id, thread.version, JSON.stringify(result.references), brand).first()
+      .bind(Date.now() + leaseMs, ...key, claim.attempts, brand, thread.id, thread.version, brand,connectionId??null,brand,connectionId??null,registered?.version??0, JSON.stringify(result.references), brand).first()
     if (!locked) { await transition('retry'); continue }
     const reply = result.text
     const outcome = !withinWindow(job.received) ? 'expired' : mock ? 'sent' : await sendMessenger(env, job.recipient, reply, fetcher)
