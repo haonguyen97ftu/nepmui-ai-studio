@@ -48,7 +48,7 @@ const suspicious = /\b(ignore (all |previous |prior )?instructions|system prompt
 const sensitive = /\b(di ung|ngo doc|hoa hoan|chay nha|chan thuong|bong da|bong nang|bi bong|tu tu|chay no|scam|suicide|allerg\w*|poison\w*|refund dispute|injur\w*|credit card|mat khau|the tin dung|password|dia chi cua toi|thong tin ca nhan|so tai khoan|otp)\b/
 
 function selectionSchema(ids: string[], max: number) {
-  return { type: 'array', maxItems: Math.min(ids.length, max), uniqueItems: true,
+  return { type: 'array', maxItems: Math.min(ids.length, max),
     items: ids.length ? { type: 'string', enum: ids } : { type: 'string' } }
 }
 function requestFor(input: ProviderInput) {
@@ -77,7 +77,7 @@ function requestFor(input: ProviderInput) {
   }
 }
 
-type Diagnostic = { code: string; responseType?: string; outputBytes?: number; fields?: string[]; requestBytes?: number; maxTokens?: number; reservedNeurons?: number }
+type Diagnostic = { code: string; responseType?: string; outputBytes?: number; fields?: string[]; requestBytes?: number; maxTokens?: number; reservedNeurons?: number; providerCode?: number; schemaKeyword?: string }
 async function generate(ai: Inference, model: typeof models[number], request: ReturnType<typeof requestFor>, diagnostic: Diagnostic) {
   const result = await ai.run(model, request)
   if (!result || typeof result !== 'object' || !('response' in result)) {
@@ -230,8 +230,17 @@ export async function answer(store: Studio, ai: Inference | undefined, question:
         diagnostic.code = 'invalid_selection'
       }
     } catch (error) {
-      diagnostic.code = error instanceof Error && /JSON Mode couldn't be met/i.test(error.message)
-        ? 'json_mode_unmet' : 'inference_error'
+      const message = error instanceof Error ? error.message : ''
+      const code = /(?:AiError:|error code[: =]*|code[: =]*)\s*(\d{3,6})\b/i.exec(message)?.[1]
+      if (code) diagnostic.providerCode = Number(code)
+      diagnostic.schemaKeyword = ['uniqueItems', 'maxItems', 'additionalProperties', 'json_schema', 'response_format']
+        .find(keyword => message.includes(keyword))
+      diagnostic.code = /JSON Mode couldn't be met/i.test(message) ? 'json_mode_unmet'
+        : /schema|grammar|structured output/i.test(message) ? 'schema_rejected'
+        : /quota|neuron|limit exceeded/i.test(message) ? 'provider_quota'
+        : /rate limit|too many requests/i.test(message) ? 'provider_rate_limit'
+        : /invalid|validation|parameter/i.test(message) ? 'invalid_parameter'
+        : 'inference_error'
     }
     return output(safePlan, 'extractive-fallback') ?? finish('no_selection')
   } catch {

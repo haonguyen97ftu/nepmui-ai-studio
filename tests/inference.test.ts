@@ -54,9 +54,12 @@ describe('Workers AI product inference regressions', () => {
   })
 
   it('never exposes provider exception text or private output through diagnostics', async () => {
-    for (const text of ["JSON Mode couldn't be met person@example.org", 'private token person@example.org']) {
+    for (const [text, code] of [["JSON Mode couldn't be met person@example.org", 'json_mode_unmet'],
+      ['private token person@example.org', 'inference_error'],
+      ['AiError: 3006 invalid schema uniqueItems person@example.org', 'schema_rejected']]) {
       const response = await answer(store(), { run: async () => { throw new Error(text) } }, failed[0].question, [])
-      expect(response.diagnostic.code).toBe(text.startsWith('JSON Mode') ? 'json_mode_unmet' : 'inference_error')
+      expect(response.diagnostic.code).toBe(code)
+      if (code === 'schema_rejected') expect(response.diagnostic).toMatchObject({ providerCode: 3006, schemaKeyword: 'uniqueItems' })
       expect(JSON.stringify(response)).not.toContain('person@example.org')
     }
     const response = await answer(store(), { run: async () => ({ response: { secret: 'person@example.org' } }) }, failed[0].question, [])
