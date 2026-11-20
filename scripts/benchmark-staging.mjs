@@ -44,10 +44,13 @@ try {
       }
     }
   }
+  const conversations = new Map()
   let passed = 0
   for (const scenario of fixture.cases) {
     const { result, conversation } = await api('playground', 'POST', { question: scenario.question })
-    cleanup.push({ path: 'conversations/' + conversation.id, version: conversation.version })
+    const saved = { path: 'conversations/' + conversation.id, version: conversation.version }
+    cleanup.push(saved)
+    conversations.set(scenario.id, { conversation, saved })
     const ok = result.reason === scenario.reason &&
       (scenario.reason !== 'grounded' || result.method === 'generated') &&
       (scenario.includes ?? []).every(text => result.text.includes(text)) &&
@@ -55,12 +58,42 @@ try {
     passed += Number(ok)
     console.log(JSON.stringify({ scenario: scenario.id, passed: ok, method: result.method, reason: result.reason, ms: result.latency, diagnostic: result.diagnostic }))
   }
-  console.log(JSON.stringify({ passed, total: fixture.cases.length }))
+  console.log(JSON.stringify({ passed, total: fixture.cases.length, model: model.data.model }))
+  // Additional checks keep the original 13 scenarios and assertions intact.
+  const consultation = conversations.get('consultation')
+  const preference = await api('playground', 'POST', {
+    question: 'Mình thích hương tuyết tùng', conversationId: consultation.conversation.id,
+  })
+  consultation.saved.version = preference.conversation.version
+  const preferenceOk = preference.result.method === 'generated' && preference.result.reason === 'grounded' &&
+    preference.result.text.includes('Gỗ tuyết tùng') && !preference.result.text.includes('Hoa Trắng') &&
+    !preference.result.text.includes('Bạn thích nhóm hương nào')
+  console.log(JSON.stringify({ scenario: 'multi-turn-preference', passed: preferenceOk, diagnostic: preference.result.diagnostic }))
+
+  const product = cleanup.find(item => item.path.startsWith('products/'))
+  const current = await api(product.path)
+  const updated = await api(product.path, 'PUT', { version: current.version,
+    data: { ...current.data, price: 265000, availability: 'unavailable' } })
+  product.version = updated.version
+  const price = conversations.get('current-price')
+  const refreshed = await api('playground', 'POST', {
+    question: 'Còn giá và tồn kho?', conversationId: price.conversation.id,
+  })
+  price.saved.version = refreshed.conversation.version
+  const refreshedOk = refreshed.result.method === 'generated' && refreshed.result.reason === 'grounded' &&
+    refreshed.result.text.includes('265.000 ₫') && refreshed.result.text.includes('hết hàng') &&
+    !refreshed.result.text.includes('245.000') && refreshed.result.references.some(ref => ref.id === updated.id && ref.version === updated.version)
+  console.log(JSON.stringify({ scenario: 'multi-turn-current-catalog', passed: refreshedOk, diagnostic: refreshed.result.diagnostic }))
+  if (!preferenceOk || !refreshedOk) process.exitCode = 1
   if (passed !== fixture.cases.length) process.exitCode = 1
 } finally {
   for (const item of cleanup.reverse()) {
     try {
-      await api(item.path + '?version=' + item.version, 'DELETE')
+      // Refresh only IDs created by this run, so a committed follow-up whose
+      // response timed out does not strand a synthetic row at a newer version.
+      const current = await api(item.path)
+      const row = item.path.startsWith('conversations/') ? current.item : current
+      await api(item.path + '?version=' + row.version, 'DELETE')
     } catch {
       console.error('A synthetic staging record needs manual cleanup.')
       process.exitCode = 1
