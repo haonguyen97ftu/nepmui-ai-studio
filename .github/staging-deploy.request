@@ -1,6 +1,3 @@
-NM-AI-DEPLOY-01
-Deploy reviewed staging release 51f06c4e23f1263587de0b7677e0dc4eedca1fb6.
-
-Retry after adding URL readiness check.
-
-NM-AI-03 diagnostic staging: 9bc0668; inference behavior unchanged.
+NM-AI-03
+Run diagnostic release 9bc0668776aea9e1c27d4cbedf1d7aefc802fc61 on staging only.
+Preserve synthetic benchmark assertions and existing quota limits.
