@@ -1,6 +1,5 @@
-NM-AI-03 optimized staging
-Release a9f53a72a443f5798cbdcb26815fcc37e4ee5c50.
+NM-AI-03 simplified schema evaluation
+Release 8af07112fb383ea08dddc010d80dbf09196cc6a0.
 51 offline tests and 8 browser scenarios passed.
-Keep all original hosted assertions plus two multi-turn checks.
-Temporarily reserve at most 40 calls / 6000 Neurons; restore 20 / 4000 after run.
-No production, paid service or live Messenger.
+Provider schema omits uniqueItems; local duplicate validation remains.
+Restore standard staging limits after the unchanged benchmark.
