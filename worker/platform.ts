@@ -1,7 +1,7 @@
 import type { Hono } from 'hono'
 import { setCookie } from 'hono/cookie'
 import { z } from 'zod'
-import { accountPassword, passwordHash, authReady, throttle, accountsExist, audit, createSession, legacyWorkspace, roles, workspaceRole, type Principal } from './accounts'
+import { accountPassword, passwordHash, authReady, throttle, accountsExist, founderReady, audit, createSession, legacyWorkspace, roles, workspaceRole, type Principal } from './accounts'
 import { equalSecret, jsonBody, sessionAge, sessionCookie } from './security'
 import type { Env, Variables } from './index'
 
@@ -129,6 +129,8 @@ export function platformRoutes(app: Hono<{ Bindings: Env; Variables: Variables }
   })
   app.post('/api/accounts', async c => {
     const user = c.get('principal')!
+    if (user.legacy || !await founderReady(c.env.DB)) return c.json({error:'bootstrap_required'},403)
+    if (!c.get('demo') && !user.hash) return c.json({error:'forbidden'},403)
     if (!user.superAdmin && user.role !== 'brand-admin') return c.json({ error:'forbidden' },403)
     const input = z.object({ email:z.email().max(254).transform(v=>v.toLowerCase()),name:z.string().trim().min(1).max(80),
       password:z.string().min(16).max(128),role:z.enum(roles),superAdmin:z.boolean().default(false) }).parse(await jsonBody(c.req.raw))
@@ -136,10 +138,11 @@ export function platformRoutes(app: Hono<{ Bindings: Env; Variables: Variables }
     if (await c.env.DB.prepare('SELECT 1 FROM accounts WHERE email=?').bind(input.email).first()) return c.json({ error:'conflict' },409)
     if (!authReady(c.env)) return c.json({error:'auth_unavailable'},409)
     const id=crypto.randomUUID(), { hash,salt }=await accountPassword(input.password,c.env.AUTH_PEPPER!)
-    await c.env.DB.batch([
-      c.env.DB.prepare('INSERT INTO accounts(id,email,name,password_hash,salt,active,super_admin,created) VALUES (?,?,?,?,?,1,?,?)').bind(id,input.email,input.name,hash,salt,Number(input.superAdmin),Date.now()),
-      c.env.DB.prepare('INSERT INTO memberships VALUES (?,?,?)').bind(id,user.workspaceId,input.role),
+    const created=await c.env.DB.batch([
+      c.env.DB.prepare('INSERT INTO accounts(id,email,name,password_hash,salt,active,super_admin,created) SELECT ?,?,?,?,?,1,?,? WHERE EXISTS(SELECT 1 FROM accounts WHERE active=1 AND super_admin=1) RETURNING id').bind(id,input.email,input.name,hash,salt,Number(input.superAdmin),Date.now()),
+      c.env.DB.prepare('INSERT INTO memberships(account_id,brand_id,role) SELECT id,?,? FROM accounts WHERE id=?').bind(user.workspaceId,input.role,id),
     ])
+    if (!created[0].results.length) return c.json({error:'bootstrap_required'},403)
     await audit(c.env.DB,user.id,'account.create',id,user.workspaceId)
     return c.json({ id },201)
   })

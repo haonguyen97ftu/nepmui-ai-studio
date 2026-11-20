@@ -296,3 +296,5 @@ h1 { font-family:"Be Vietnam Pro",system-ui,sans-serif; font-size:clamp(1.65rem,
 }
 .skip:not(:focus-visible) { clip-path:inset(50%); width:1px; height:1px; overflow:hidden; padding:0; margin:-1px; }
 .skip:focus-visible { clip-path:none; width:auto; height:auto; padding:10px; margin:0; transform:translateY(0); }
+.bootstrap-only { display:grid; gap:20px; width:min(100%,640px); }
+.bootstrap-only .logo { justify-self:start; }

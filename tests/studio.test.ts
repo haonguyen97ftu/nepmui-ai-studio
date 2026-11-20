@@ -16,12 +16,16 @@ let db: Awaited<ReturnType<typeof runtime>>['db']
 let cookie: string
 
 beforeAll(async () => {
-  const instance = await runtime({ ADMIN_SECRET: secret, META_APP_SECRET: meta, META_VERIFY_TOKEN: verify, META_PAGE_ID: '100', MESSENGER_INGEST: 'true' })
+  const instance = await runtime({ ADMIN_SECRET: secret, AUTH_PEPPER: 'b'.repeat(64), META_APP_SECRET: meta, META_VERIFY_TOKEN: verify, META_PAGE_ID: '100', MESSENGER_INGEST: 'true' })
   app = instance.app
   db = instance.db
   const response = await request('session', 'POST', { token: secret }, false)
   expect(response.status).toBe(200)
-  cookie = response.headers.get('Set-Cookie')!.split(';')[0]
+  const legacy=response.headers.get('Set-Cookie')!.split(';')[0]
+  const claimed=await app.dispatchFetch(origin+'/api/bootstrap',{method:'POST',headers:{Origin:origin,Cookie:legacy,'Content-Type':'application/json'},body:JSON.stringify({name:'Synthetic Studio Founder',email:'studio-founder@example.test',password:'Synthetic-studio-founder-password!'})})
+  expect(claimed.status).toBe(201)
+  cookie = claimed.headers.get('Set-Cookie')!.split(';')[0]
+  await db.prepare("INSERT INTO channels(id,brand_id,kind,external_id,name,mock,paused,verified,token_cipher) VALUES ('studio-page','nepmui','messenger','100','Synthetic studio Page',0,0,1,'synthetic-encrypted-test-envelope')").run()
   expect(response.headers.get('Set-Cookie')).toMatch(/HttpOnly; Secure; SameSite=Strict/i)
 })
 afterAll(async () => { await app?.dispose() })
@@ -115,7 +119,7 @@ describe('Messenger intake', () => {
     expect((await deliver('{}')).status).toBe(403)
     const valid = await Promise.all([deliver(JSON.stringify(messenger)), deliver(JSON.stringify(messenger))])
     expect(valid.map(response => response.status)).toEqual([200, 200])
-    const conversation = await (await request('conversations/messenger%3A200')).json() as { item: { data: { messages: unknown[] } } }
+    const conversation = await (await request('conversations/messenger%2Fstudio-page%3A200')).json() as { item: { data: { messages: unknown[] } } }
     expect(conversation.item.data.messages).toHaveLength(1)
     expect(await (await request('integrations/messenger/mock', 'POST', messenger)).json()).toEqual({ accepted: 1, duplicate: 0, sent: 0 })
     expect(await (await request('integrations/messenger/mock', 'POST', messenger)).json()).toEqual({ accepted: 0, duplicate: 1, sent: 0 })

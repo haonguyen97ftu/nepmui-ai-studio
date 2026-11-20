@@ -4,7 +4,7 @@ import { revoked } from './privacy'
 import type { Env } from './index'
 
 export const roles = ['brand-admin', 'ai-trainer', 'customer-service', 'viewer'] as const
-export type Role = typeof roles[number] | 'super-admin'
+export type Role = typeof roles[number] | 'super-admin' | 'bootstrap'
 export type Principal = { id: string; email: string; role: Role; superAdmin: boolean; workspaceId: string | null; hash?: string; legacy?: boolean }
 export const legacyWorkspace = 'nepmui'
 export const credentials = z.object({ email: z.email().max(254).transform(value => value.toLowerCase()), password: z.string().min(12).max(128) })
@@ -21,6 +21,10 @@ export async function passwordHash(password: string, salt: string, pepper: strin
 export async function accountPassword(password: string, pepper: string) {
   const salt = hex(crypto.getRandomValues(new Uint8Array(16)))
   return { salt, hash: await passwordHash(password, salt, pepper) }
+}
+export async function founderReady(db:D1Database) { return !!await db.prepare('SELECT 1 FROM accounts WHERE active=1 AND super_admin=1 LIMIT 1').first() }
+export function legacySessionAllowed(path:string,method:string) {
+  return (path==='/api/session' && ['GET','POST','DELETE'].includes(method)) || (path==='/api/bootstrap' && method==='POST')
 }
 export async function accountsExist(db: D1Database) { return !!await db.prepare('SELECT 1 FROM accounts LIMIT 1').first() }
 export async function audit(db: D1Database, actor: string, action: string, target: string, workspace: string | null = null) {
@@ -55,7 +59,7 @@ export async function principal(env: Env, token: string | undefined, demo = fals
   }
   // The legacy credential is accepted only before the first account is claimed.
   if (!await accountsExist(env.DB) && await authorized(env.ADMIN_SECRET,legacyWorkspace,token) && !await revoked(env.DB,legacyWorkspace,token)) {
-    return { id: 'bootstrap', email: '', superAdmin: true, role: 'super-admin', workspaceId: legacyWorkspace, legacy: true }
+    return { id: 'bootstrap', email: '', superAdmin: false, role: 'bootstrap', workspaceId: null, legacy: true }
   }
 }
 export async function throttle(db: D1Database, secret: string, key: string, max: number) {
@@ -80,6 +84,7 @@ export async function login(env: Env, email: string, password: string) {
   return createSession(env.DB,account.id,workspace?.id ?? null,account.auth_version)
 }
 export function allowed(role: Role, path: string, method: string) {
+  if (role==='bootstrap') return false
   if (role === 'super-admin' || role === 'brand-admin') return true
   const read = method === 'GET' || method === 'HEAD'
   const section = path.split('/')[2]

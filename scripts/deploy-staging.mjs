@@ -2,8 +2,8 @@ import { resolve,relative,isAbsolute } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { readFileSync,statSync } from 'node:fs'
 
-// Schema 0003 must be approved, backed up, applied and checked separately first.
-if (process.env.STUDIO_PLATFORM_MIGRATION_READY !== '0003_platform.sql') {
+// Schema 0003 and 0004 must be approved, backed up, applied and checked separately first.
+if (process.env.STUDIO_PLATFORM_MIGRATION_READY !== '0004_founder_invariant.sql') {
   console.error('Platform staging deploy is gated: complete the approved backup/migration/security runbook first.')
   process.exit(1)
 }

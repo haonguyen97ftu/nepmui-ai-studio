@@ -76,3 +76,25 @@ test('keeps workspace data and navigation within the viewport at four responsive
     await shot(page,'responsive-'+width)
   }
 })
+
+test('limits an unclaimed founder session to setup and reaches account-based administration',async({page},info)=>{
+  const {runtime}=await import('../scripts/runtime.mjs')
+  const secret='synthetic-browser-bootstrap-key-041'
+  const instance=await runtime({ADMIN_SECRET:secret,AUTH_PEPPER:'f'.repeat(64)})
+  try {
+    await page.goto(String(instance.url))
+    await page.getByRole('button',{name:'Thiết lập nhà sáng lập lần đầu'}).click()
+    await page.getByLabel('Khóa nhà sáng lập').fill(secret)
+    await page.getByRole('button',{name:'Đăng nhập',exact:true}).click()
+    await expect(page.getByRole('heading',{name:'Thiết lập tài khoản nhà sáng lập'})).toBeVisible()
+    await expect(page.locator('nav')).toHaveCount(0)
+    await expect(page.getByLabel('Chọn không gian làm việc')).toHaveCount(0)
+    await page.getByLabel('Tên quản trị viên').fill('Synthetic Browser Founder')
+    await page.getByLabel('Email tài khoản').fill('browser-founder@example.test')
+    await page.getByLabel('Mật khẩu mới').fill('Synthetic-browser-founder-password!')
+    await page.getByRole('button',{name:'Tạo tài khoản nhà sáng lập'}).click()
+    await expect(page.getByRole('heading',{name:'Tổng quan',exact:true})).toBeVisible()
+    if (info.project.name==='iphone') await page.getByRole('button',{name:'Mở menu',exact:true}).click()
+    await expect(page.getByRole('navigation').getByRole('link',{name:'Nền tảng',exact:true})).toBeVisible()
+  } finally {await instance.app.dispose()}
+})

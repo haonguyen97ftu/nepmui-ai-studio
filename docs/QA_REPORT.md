@@ -1,4 +1,23 @@
-# NM-AI-04 platform QA
+# NM-AI-04.1 critical bootstrap security QA
+
+Predecessor under review: `a91f1c5fce7720a963340e0e5dc8c862d72264e9`. The independent P0 finding was reproduced locally before the fix: legacy POST `/api/accounts` returned **201 instead of the expected 403**, producing a normal first account. No hosted database was used.
+
+The corrected setup principal is not a Super Admin, has no workspace and can use only exact session/bootstrap operations. Management routes deny it centrally; normal account creation also rejects it at the handler and requires an existing active founder in SQL. Forward migration 0004 enforces first-account and surviving-active-admin invariants, including replacement and delete paths. Its preflight refuses an already unsafe predecessor without granting privileges or deleting rows. Deployment rejects the old 0003 readiness marker.
+
+## Hotfix evidence
+
+- **98 unit/integration tests**: all existing regressions, 22 new bootstrap security tests and a release-marker regression. Tests include route denial, same-cookie reuse, stale privileged snapshots, competing claims plus normal creations, interruptions before account commit and during session creation, normal account login recovery, SQLite replacement/update/delete attacks and unsafe-state migration rollback.
+- **13 Playwright scenarios passed**, 3 intentional project-specific skips. The new flow uses an unclaimed non-demo D1 on desktop/iPhone: key login exposes only setup, founder claim succeeds, then account-based management becomes available. Existing multi-workspace/role/Page UI scenarios remain.
+- Lint, typecheck and both Worker builds pass. The migration report now applies 0003 and 0004 and verifies unchanged records/revisions/pending delivery, FTS, historical usage, foreign keys and all three founder-invariant guards.
+- Existing administration fixtures now claim founder accounts explicitly; signed ingestion uses a registered verified synthetic Page. Original Vietnamese fixture and the 13+2 hosted assertions are unchanged. No hosted benchmark, migration, deployment, Messenger activation or paid service was invoked.
+- Mutation evidence: changing the first-account SQL guard from OR to AND made the direct-SQL invariant regression fail; restoring the guard passed. Built bundles contain no bootstrap fixture credentials.
+- Fresh authentication lifecycle review checked the exact principal/authorization transitions, independent API and DB defenses, concurrent claim serialization, replacement semantics with recursive triggers on/off, post-commit recovery, session revocation/generation and release gating. Required review findings are resolved. Exact reviewed SHA and GitHub Actions evidence are recorded in PR #1 and the delivery response.
+
+The predecessor's insecure behavior and the corrected behavior are explicit; earlier NM-AI-04 review/validation below is historical evidence, not approval of the vulnerable commit. See [security lifecycle review](SECURITY.md), [forward migration evidence](MIGRATION_REPORT.md) and [release gate](DEPLOYMENT.md).
+
+---
+
+## NM-AI-04 historical platform QA
 
 The multi-workspace candidate is tested in the cloud workspace against disposable synthetic D1. The previously approved hosted staging deployment remains NM-AI-03. No NM-AI-04 remote backup, schema migration, Page verification, production operation or live Messenger activation has been performed.
 

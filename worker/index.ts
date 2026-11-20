@@ -1,5 +1,5 @@
 import { connection, engineStore, registryRoutes, type Connection } from './registry'
-import { allowed, accountsExist, credentials, digest, legacyWorkspace, login, principal, throttle, audit, type Principal } from './accounts'
+import { legacySessionAllowed, allowed, accountsExist, credentials, digest, legacyWorkspace, login, principal, throttle, audit, type Principal } from './accounts'
 import { platformRoutes } from './platform'
 import { Hono } from 'hono'
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie'
@@ -54,6 +54,10 @@ app.use('/api/*', async (c, next) => {
   const publicSession=url.pathname==='/api/session' && ['GET','POST'].includes(c.req.method)
   if (publicSession) return next()
   if (!user) return c.json({ error:'unauthorized' },401)
+  if (user.legacy) {
+    if (!legacySessionAllowed(url.pathname,c.req.method)) return c.json({error:'bootstrap_required'},403)
+    return next()
+  }
   if (c.req.header('X-Workspace-ID') && c.req.header('X-Workspace-ID')!==user.workspaceId) return c.json({ error:'workspace_changed' },403)
   const globalRoute=/^\/api\/(session|bootstrap|workspaces|platform|accounts|account)(?:\/|$)/.test(url.pathname)
   if (!globalRoute && !user.workspaceId) return c.json({ error:'workspace_required' },409)
@@ -71,8 +75,8 @@ app.use('/api/*', async (c, next) => {
 
 app.get('/api/session', async c => {
   const user=c.get('principal')
-  const profile=user?.workspaceId ? await c.env.DB.prepare('SELECT logo,color,language,archived,version FROM workspace_profiles WHERE brand_id=?').bind(user.workspaceId).first() : undefined
-  const brand=user?.workspaceId ? await c.env.DB.prepare('SELECT id,name,active FROM brands WHERE id=?').bind(user.workspaceId).first() : undefined
+  const profile=user?.workspaceId && !user.legacy ? await c.env.DB.prepare('SELECT logo,color,language,archived,version FROM workspace_profiles WHERE brand_id=?').bind(user.workspaceId).first() : undefined
+  const brand=user?.workspaceId && !user.legacy ? await c.env.DB.prepare('SELECT id,name,active FROM brands WHERE id=?').bind(user.workspaceId).first() : undefined
   return c.json({ authenticated:!!user,demo:c.get('demo'),staging:c.env.STUDIO_ENV==='staging',
     bootstrapRequired:!!user?.legacy, user:user ? { id:user.id,email:user.email,role:user.role,superAdmin:user.superAdmin } : undefined,
     brand:brand ? { ...brand,...profile } : undefined })

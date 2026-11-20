@@ -26,10 +26,13 @@ function event(mid: string, text: string, timestamp = Date.now()) {
 }
 
 beforeAll(async () => {
-  instance = await runtime({ ADMIN_SECRET: key, STUDIO_ENV: 'staging', MESSENGER_INGEST: 'true', MESSENGER_OUTBOUND: 'true', META_VERIFY_TOKEN: 'fixture-token' })
+  instance = await runtime({ ADMIN_SECRET: key, AUTH_PEPPER:'c'.repeat(64), STUDIO_ENV: 'staging', MESSENGER_INGEST: 'true', MESSENGER_OUTBOUND: 'true', META_VERIFY_TOKEN: 'fixture-token' })
   const login = await api('session', 'POST', { token: key })
   expect(login.status).toBe(200)
   cookie = login.headers.get('Set-Cookie')!.split(';')[0]
+  const claim=await api('bootstrap','POST',{name:'Synthetic Phase Founder',email:'phase-founder@example.test',password:'Synthetic-phase-founder-password!'})
+  expect(claim.status).toBe(201)
+  cookie=claim.headers.get('Set-Cookie')!.split(';')[0]
   const { DB } = await instance.app.getBindings<{ DB: D1Database }>()
   const store = studio(DB, 'nepmui')
   for (const item of evaluation.knowledge) await store.create('knowledge', contracts.knowledge.parse(item))

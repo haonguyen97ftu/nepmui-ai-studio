@@ -17,8 +17,10 @@ try {
   const before={records:(await db.prepare('SELECT * FROM records ORDER BY brand_id,kind,id').all()).results,
     revisions:(await db.prepare('SELECT * FROM revisions ORDER BY brand_id,id').all()).results,
     pending:(await db.prepare('SELECT brand_id,channel,external_id,thread_id,recipient,question,received,due,state,attempts FROM messenger_outbox ORDER BY external_id').all()).results}
-  const sql=await readFile(new URL('../migrations/0003_platform.sql',import.meta.url),'utf8')
-  await db.batch(sql.split(/^-- studio-statement$/m).filter(part=>part.trim()).map(part=>db.prepare(part)))
+  for (const filename of ['0003_platform.sql','0004_founder_invariant.sql']) {
+    const sql=await readFile(new URL('../migrations/'+filename,import.meta.url),'utf8')
+    await db.batch(sql.split(/^-- studio-statement$/m).filter(part=>part.trim()).map(part=>db.prepare(part)))
+  }
   const after={records:(await db.prepare('SELECT * FROM records ORDER BY brand_id,kind,id').all()).results,
     revisions:(await db.prepare('SELECT * FROM revisions ORDER BY brand_id,id').all()).results,
     pending:(await db.prepare('SELECT brand_id,channel,external_id,thread_id,recipient,question,received,due,state,attempts FROM messenger_outbox ORDER BY external_id').all()).results}
@@ -27,7 +29,9 @@ try {
   assert.deepEqual(await db.prepare("SELECT calls,neurons FROM platform_usage WHERE day='2055-01-01'").first(),{calls:3,neurons:99})
   await db.prepare("INSERT INTO brands VALUES ('synthetic-second','Synthetic second',1)").run()
   assert.equal((await db.prepare("SELECT record_id FROM studio_search WHERE studio_search MATCH 'preservation' AND brand_id='nepmui'").all()).results.length,1)
-  const report={migration:'0003_platform.sql',scope:'disposable synthetic D1 only',passed:true,
+  const guards=(await db.prepare("SELECT name FROM sqlite_master WHERE type='trigger' AND name IN ('require_active_founder_on_insert','require_active_founder_on_update','protect_last_superadmin_delete')").all()).results
+  assert.equal(guards.length,3)
+  const report={founderInvariantGuards:guards.length,migrations:['0003_platform.sql','0004_founder_invariant.sql'],scope:'disposable synthetic D1 only',passed:true,
     preserved:{records:before.records.length,revisions:before.revisions.length,pendingDeliveries:before.pending.length},
     beforeSha256:digest(before),afterSha256:digest(after),foreignKeyViolations:0,existingSearchPreserved:true,
     legacyUsageBackfilled:true,multipleActiveWorkspaces:true,remoteMigrationApplied:false}
