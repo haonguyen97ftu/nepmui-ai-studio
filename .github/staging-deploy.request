@@ -1,3 +1,4 @@
 NM-AI-03
 Run diagnostic release 9bc0668776aea9e1c27d4cbedf1d7aefc802fc61 on staging only.
 Preserve synthetic benchmark assertions and existing quota limits.
+Use full pinned SHA for checkout.
