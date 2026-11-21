@@ -32,7 +32,7 @@ jobs:
           APP_DIR: ${{ github.workspace }}/candidate
         run: |
           node --check release-ops/ops/staging-hosted.mjs
-          node --test release-ops/ops/staging-release.test.mjs
+          node --test release-ops/ops/*.test.mjs
       - name: Exercise the exact migration CLI against disposable D1
         working-directory: candidate
         env:

@@ -1,11 +1,10 @@
 import { spawn } from 'node:child_process'
-import { readFile, writeFile } from 'node:fs/promises'
+import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { candidate } from './staging-release.mjs'
+import { fileURLToPath } from 'node:url'
+import { candidate } from './governance.mjs'
 
-const env = process.env
 const origin = 'https://nepmui-ai-studio-staging.haonguyen-drew.workers.dev'
-const command = process.argv[2]
 let cookie, scope
 
 function check(ok, message) {
@@ -27,7 +26,7 @@ async function json(path, method, body) {
   return response.json()
 }
 
-async function verifyBuild() {
+async function verifyBuild(env) {
   const output = join(env.APP_DIR, '.cloudflare/output/v1/workers/default')
   const config = JSON.parse(await readFile(join(output, 'worker.config.json'), 'utf8'))
   check(config.name === 'nepmui-ai-studio-staging' && config.previewUrls === false &&
@@ -39,17 +38,7 @@ async function verifyBuild() {
     'Staging bundle is missing the exact candidate marker.')
 }
 
-async function prepareSecrets() {
-  const secrets = { ADMIN_SECRET: env.ADMIN_SECRET, AUTH_PEPPER: env.AUTH_PEPPER }
-  if (env.CHANNEL_ENCRYPTION_KEY) secrets.CHANNEL_ENCRYPTION_KEY = env.CHANNEL_ENCRYPTION_KEY
-  const values = [...Object.values(secrets), env.STAGING_RECOVERY_KEY]
-  check(values.every(value => /^[a-f0-9]{64}$/i.test(value ?? '')) &&
-    new Set(values.map(value => value.toLowerCase())).size === values.length,
-  'Required protected staging keys must be distinct 32-byte hex values.')
-  await writeFile(join(env.RUNNER_TEMP, 'studio-runtime-secrets.json'), JSON.stringify(secrets), { mode: 0o600, flag: 'wx' })
-}
-
-async function smoke() {
+export async function smoke() {
   let ready = false
   for (let i = 0; i < 12 && !ready; i++) {
     try {
@@ -72,7 +61,7 @@ async function smoke() {
   console.log('Exact candidate, signed-out gates and blocked Messenger webhook verified.')
 }
 
-async function acceptance() {
+export async function acceptance(env) {
   const email = env.STUDIO_BENCHMARK_EMAIL, password = env.STUDIO_BENCHMARK_PASSWORD
   const workspace = env.STUDIO_BENCHMARK_WORKSPACE
   check(email && password && /^[a-zA-Z0-9_-]{1,160}$/.test(workspace ?? ''), 'Scoped staging account configuration is missing.')
@@ -97,7 +86,7 @@ async function acceptance() {
     try {
       if (changed) await json('models', 'PUT', { version, data: desired })
       const result = await new Promise((resolve, reject) => {
-        const child = spawn('npm', ['run', 'benchmark:staging'], { cwd: env.APP_DIR, stdio: 'inherit' })
+        const child = spawn('npm', ['run', 'benchmark:staging'], { cwd: env.APP_DIR, stdio: 'inherit', env })
         child.once('error', reject)
         child.once('close', resolve)
       })
@@ -122,12 +111,12 @@ async function acceptance() {
   }
 }
 
-try {
-  check(env.STUDIO_BENCHMARK_URL === origin, 'Unexpected staging Worker URL.')
-  const commands = { build: verifyBuild, secrets: prepareSecrets, smoke, acceptance }
-  check(Object.hasOwn(commands, command), 'Unknown staging operation.')
-  await commands[command]()
-} catch (error) {
-  console.error(error.name === 'Error' && !error.code ? error.message : 'Staging operation failed.')
-  process.exitCode = 1
+if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+  try {
+    check(process.argv[2] === 'build', 'Only an offline build verification is available here.')
+    await verifyBuild(process.env)
+  } catch (error) {
+    console.error(error.name === 'Error' && !error.code ? error.message : 'Staging build verification failed.')
+    process.exitCode = 1
+  }
 }
