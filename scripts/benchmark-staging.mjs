@@ -1,9 +1,8 @@
 import { readFile } from 'node:fs/promises'
 
-const { STUDIO_BENCHMARK_URL, STUDIO_BENCHMARK_ADMIN_SECRET, STUDIO_BENCHMARK_EMAIL, STUDIO_BENCHMARK_PASSWORD, STUDIO_BENCHMARK_WORKSPACE } = process.env
-const accountMode=!!(STUDIO_BENCHMARK_EMAIL && STUDIO_BENCHMARK_PASSWORD)
-if (!STUDIO_BENCHMARK_URL || (!accountMode && !STUDIO_BENCHMARK_ADMIN_SECRET) || (accountMode && !STUDIO_BENCHMARK_WORKSPACE)) {
-  throw new Error('Set the staging URL and private benchmark credentials. Account mode also requires the authorized workspace ID.')
+const { STUDIO_BENCHMARK_URL, STUDIO_BENCHMARK_EMAIL, STUDIO_BENCHMARK_PASSWORD, STUDIO_BENCHMARK_WORKSPACE } = process.env
+if (!STUDIO_BENCHMARK_URL || !STUDIO_BENCHMARK_EMAIL || !STUDIO_BENCHMARK_PASSWORD || !STUDIO_BENCHMARK_WORKSPACE) {
+  throw new Error('The staging benchmark requires scoped account credentials and the authorized workspace ID.')
 }
 const host = new URL(STUDIO_BENCHMARK_URL)
 if (host.protocol !== 'https:' || !/^nepmui-ai-studio-staging\.[\w-]+\.workers\.dev$/.test(host.hostname)) {
@@ -23,11 +22,11 @@ async function api(path, method = 'GET', payload) {
   return response.json()
 }
 try {
-  await api('session', 'POST', accountMode ? {email:STUDIO_BENCHMARK_EMAIL,password:STUDIO_BENCHMARK_PASSWORD} : { token: STUDIO_BENCHMARK_ADMIN_SECRET })
-  if (accountMode) await api('workspaces/'+encodeURIComponent(STUDIO_BENCHMARK_WORKSPACE)+'/switch','POST')
+  await api('session', 'POST', {email:STUDIO_BENCHMARK_EMAIL,password:STUDIO_BENCHMARK_PASSWORD})
+  await api('workspaces/'+encodeURIComponent(STUDIO_BENCHMARK_WORKSPACE)+'/switch','POST')
   const session=await api('session')
-  if (accountMode && session.brand?.id!==STUDIO_BENCHMARK_WORKSPACE) throw new Error('Benchmark workspace mismatch.')
-  workspaceScope=accountMode?STUDIO_BENCHMARK_WORKSPACE:undefined
+  if (session.brand?.id!==STUDIO_BENCHMARK_WORKSPACE) throw new Error('Benchmark workspace mismatch.')
+  workspaceScope=STUDIO_BENCHMARK_WORKSPACE
   if (!session.staging) throw new Error('The session does not identify this Worker as staging.')
   const model = await api('models')
   if (model.data.provider !== 'workers-ai' || model.data.dailyLimit < fixture.cases.length || model.data.dailyNeurons === 0) {

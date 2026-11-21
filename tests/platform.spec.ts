@@ -98,3 +98,29 @@ test('limits an unclaimed founder session to setup and reaches account-based adm
     await expect(page.getByRole('navigation').getByRole('link',{name:'Nền tảng',exact:true})).toBeVisible()
   } finally {await instance.app.dispose()}
 })
+
+test('renders initials without fetching configured workspace logos', async ({ page }, info) => {
+  const logo = 'https://workspace-logo.example.test/synthetic.png'
+  const name = 'Logo privacy ' + info.project.name
+  const requests: string[] = []
+  await page.route('https://workspace-logo.example.test/**', async route => {
+    requests.push(route.request().url())
+    await route.abort()
+  })
+  const home = await page.goto('/#platform')
+  expect(home?.headers()['content-security-policy']).toMatch(/(?:^|; )img-src 'self';/)
+  const response = await page.request.post('/api/workspaces', {
+    headers: { Origin: new URL(page.url()).origin }, data: { name, logo },
+  })
+  expect(response.ok()).toBe(true)
+  await page.reload()
+  const row = page.getByRole('row').filter({ hasText: name })
+  await expect(row.locator('.workspace-avatar')).toHaveText('L')
+  await expect(row.locator('img')).toHaveCount(0)
+  await row.getByRole('button', { name: 'Mở', exact: true }).click()
+  const header = page.locator('.workspace-heading')
+  await expect(header).toContainText(name)
+  await expect(header.locator('.workspace-avatar')).toHaveText('L')
+  await expect(header.locator('img')).toHaveCount(0)
+  expect(requests).toEqual([])
+})

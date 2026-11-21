@@ -85,3 +85,8 @@ The first immutable review **requested changes**, rather than declaring readines
 ## AUTH-08 — P2 — Conversation management bypassed Playground ownership
 
 The NM-AI-04.2 baseline `93219f551b3494c41280175d8fe82591551e04de` restricted Playground resume. Inbox list, detail, update and training creation still used workspace-only record lookups, and dashboard aggregates included private Playground threads. NM-AI-04.3 shares the conversation visibility predicate across these paths and applies it before pagination and aggregation. Training inserts check the current actor and authorized source version. Deletion retains administrator-only access, workspace scope and optimistic version checking. Verify the remediation against the immutable PR head. WEB-03/P3 remains open.
+
+
+### WEB-03 remediation in NM-AI-05B
+
+The app shell and platform directory render workspace initials. The static asset CSP limits images to the app origin. The desktop and iPhone regression configures a synthetic third-party logo and checks both views for zero image requests. Stored URLs remain intact. The release decision requires independent review of the replacement candidate.

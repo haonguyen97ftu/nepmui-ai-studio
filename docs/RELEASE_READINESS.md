@@ -1,6 +1,6 @@
-# NM-AI-04.3 release readiness
+# NM-AI-05B release readiness
 
-Baseline: `93219f551b3494c41280175d8fe82591551e04de` (NM-AI-04.2). Use the current PR #1 head for candidate-specific checks and independent review. Hosted staging remains on its last approved release.
+Baseline: `7c6a42147e8e99cf8962d96bfcdf64ec96cc5062` (NM-AI-04.3). A new immutable QA pass and full candidate CI are required before release. Use the current PR #1 head for candidate-specific checks and independent review. Hosted staging remains on its last approved release.
 
 Required checks on the candidate are Node.js 24, lockfile install, lint, typecheck, Worker and staging builds, full unit/integration suite, authorization suite, relevant authorization mutations, Playwright and disposable D1 migration preservation. Require passing evidence and disposition of all P0/P1 and staging-blocking P2 findings before independent staging review.
 
@@ -13,4 +13,6 @@ Hosted boundaries remain unverified: Cloudflare CPU/D1 budgets and scheduler fai
 Infrastructure discovery reports zero production/full npm-audit advisories and registry-only lockfile with pinned CLI; these are point-in-time dependency evidence, not a supply-chain guarantee. CI uses read-only repository permissions, synthetic artifacts and bounded trace retention. All three Action references are pinned to verified official immutable SHAs.
 
 
-Open lower-severity finding: WEB-03/P3 remote workspace-logo privacy is retained and documented with proposed host-policy remediation. It is not represented as resolved or as owner-accepted risk.
+WEB-03/P3 remediation replaces remote logo rendering with workspace initials in both views. The same-origin image CSP provides an independent browser control. Synthetic browser coverage exercises both screens. Stored branding URLs are preserved.
+
+Review the protected operations workflow separately. The application and operations commits must be paired in PR #1, and staging remains gated by the independent QA and operational approvals in the deployment runbook.

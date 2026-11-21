@@ -150,7 +150,7 @@ function App() {
       <main className="content workspace-theme" data-brand={page==='platform'?undefined:brand?.id} id="main-content" tabIndex={-1} style={{'--workspace-accent':page==='platform'?'#235568':brand?.color??'#235568'} as CSSProperties}>
         {demo && <div className="demo-banner"><FlaskConical size={16} /><span><strong>Dữ liệu mô phỏng</strong> · Dùng để thử nghiệm quy trình nội bộ.</span></div>}
         <Feedback error={logout.error} />
-        {brand && page!=='platform' && <div className="workspace-heading"><span className="workspace-avatar">{brand.logo?<img src={brand.logo} alt="" referrerPolicy="no-referrer"/>:name.slice(0,1)}</span><div><strong>{name}</strong><small>{brand.active?'Không gian làm việc':'Chỉ đọc · Đã tạm ngưng / lưu trữ'}</small></div></div>}
+        {brand && page!=='platform' && <div className="workspace-heading"><span className="workspace-avatar">{name.slice(0,1)}</span><div><strong>{name}</strong><small>{brand.active?'Không gian làm việc':'Chỉ đọc · Đã tạm ngưng / lưu trữ'}</small></div></div>}
         {!canRead(page) ? <section className="card padded"><h1>Không có quyền truy cập</h1><p>Liên hệ Brand Admin để được cấp vai trò phù hợp.</p></section> : !brand && !['platform','account'].includes(page) ? superAdmin?<PlatformDashboard/>:<section className="card padded"><h1>Chưa được cấp không gian</h1><p>Liên hệ quản trị viên để được phân quyền.</p></section> : <section key={brand?.id??'global'} className="workspace-pages">
           {readOnly && page!=='platform' && <p className="notice-panel" role="status">Bạn đang xem ở chế độ chỉ đọc.</p>}
           <fieldset className="page-fields" disabled={readOnly && page!=='platform'}>{pages[page]}</fieldset></section>}
