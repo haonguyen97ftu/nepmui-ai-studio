@@ -1,7 +1,10 @@
 import { Hono } from 'hono'
 import { expect,it } from 'vitest'
 import { runtime } from '../scripts/runtime.mjs'
-import { principal } from '../worker/accounts'
+import { currentActor, principal } from '../worker/accounts'
+import { receiveBatch } from '../worker/channels'
+import http from '../worker/http'
+import { deleteThread, purge, retentionDays } from '../worker/privacy'
 import { platformRoutes } from '../worker/platform'
 import { registryRoutes } from '../worker/registry'
 import type { Env,Variables } from '../worker/index'
@@ -109,5 +112,61 @@ it('rejects Brand Admin provisioning for both globally known and unused emails',
     for (const email of [founder.email,'unused@lifecycle.example.test']) {
       expect((await test.api('accounts','POST',cookie,{...account,email})).status).toBe(403)
     }
+  } finally {await test.app.dispose()}
+})
+
+it('rejects a retention change when the Brand Admin loses membership before the write',async()=>{
+  const test=await fixture()
+  try {
+    const founderCookie=await test.claim()
+    const creation=await test.api('accounts','POST',founderCookie,{...account,role:'brand-admin'})
+    expect(creation.status).toBe(201)
+    const {id}=await creation.json() as {id:string}
+    const login=await test.api('session','POST','',{email:account.email,password:account.password})
+    const cookie=login.headers.get('Set-Cookie')!.split(';')[0]
+    const db=test.env.DB
+    let changed=false
+    const wrapped=Object.create(db) as D1Database
+    wrapped.prepare=(sql:string)=>{
+      const stmt=db.prepare(sql)
+      if (!/^INSERT INTO retention/.test(sql)) return stmt
+      const wrappedStmt=Object.create(stmt) as D1PreparedStatement
+      wrappedStmt.bind=(...args:unknown[])=>{
+        const bound=stmt.bind(...args)
+        const wrappedBound=Object.create(bound) as D1PreparedStatement
+        wrappedBound.first=async<T>()=>{
+          expect((await test.api('memberships/'+id,'PUT',founderCookie,{role:null})).status).toBe(200)
+          changed=true
+          return bound.first<T>()
+        }
+        return wrappedBound
+      }
+      return wrappedStmt
+    }
+    const response=await http.request(origin+'/api/privacy',{method:'PUT',headers:{Origin:origin,Cookie:cookie},body:JSON.stringify({days:1})},{...test.env,DB:wrapped})
+    expect(changed).toBe(true)
+    expect(response.status).toBe(403)
+    expect(await retentionDays(db,'nepmui')).toBe(30)
+  } finally {await test.app.dispose()}
+})
+
+it('preserves conversations, queued messages and replay state for an actor revoked after admission',async()=>{
+  const test=await fixture()
+  try {
+    const cookie=await test.claim()
+    const user=(await principal(test.env,cookie.split('=')[1]))!
+    const actor=currentActor(user,false,'brand-admin','nepmui')
+    const event={id:'existing-fixture',sender:'100',text:'Synthetic conversation'}
+    expect(await receiveBatch(test.db,'nepmui','messenger-mock',[event],true)).toBe(1)
+    await test.db.prepare("UPDATE records SET updated=0 WHERE brand_id='nepmui' AND kind='conversations'").run()
+    const stored=await test.db.prepare("SELECT id,version FROM records WHERE kind='conversations'").first<{id:string;version:number}>()
+    expect(stored).not.toBeNull()
+    expect((await test.api('accounts/'+user.id+'/revoke','POST',cookie)).status).toBe(200)
+    expect(await deleteThread(test.db,'nepmui',stored!.id,stored!.version,actor)).toBe(false)
+    expect(await purge(test.db,'nepmui',actor)).toBe(0)
+    expect(await receiveBatch(test.db,'nepmui','messenger-mock',[{...event,id:'denied-fixture'}],true,undefined,actor)).toBe(0)
+    expect(await test.db.prepare("SELECT id FROM records WHERE kind='conversations'").first()).toEqual({id:stored!.id})
+    expect(await test.db.prepare('SELECT external_id FROM messenger_outbox').all()).toMatchObject({results:[{external_id:event.id}]})
+    expect(await test.db.prepare('SELECT external_id FROM deliveries').all()).toMatchObject({results:[{external_id:event.id}]})
   } finally {await test.app.dispose()}
 })

@@ -250,6 +250,7 @@ it('preserves pre-platform records, settings, revisions, usage and pending deliv
 it('routes valid signed multi-Page events using the registry, never the runtime brand ID',async()=>{
   const appSecret='synthetic-signed-routing-key'
   const routed=await runtime({ADMIN_SECRET:secret,BRAND_ID:'wrong-runtime-tenant',META_APP_SECRET:appSecret,MESSENGER_INGEST:'true',MESSENGER_OUTBOUND:'false'},0,async db=>{
+    await db.prepare('UPDATE replay_policy SET live_not_before=0 WHERE id=1').run()
     await db.batch([
       db.prepare("INSERT INTO brands VALUES ('route-b','Synthetic routing B',1)"),
       db.prepare("INSERT INTO workspace_profiles(brand_id) VALUES ('route-b')"),

@@ -64,6 +64,8 @@ describe('D1 AI boundary enforcement', () => {
     instance = await runtime()
     const { DB } = await instance.app.getBindings<{ DB: D1Database }>()
     store = studio(DB, 'nepmui')
+    await instance.db.prepare('INSERT INTO accounts(id,email,name,password_hash,salt,active,super_admin,created) VALUES (?,?,?,?,?,1,1,0)')
+      .bind('synthetic-founder', 'founder@example.test', 'Synthetic founder', '-', '-').run()
   })
   afterAll(async () => { await instance?.app.dispose() })
 
@@ -104,8 +106,6 @@ describe('D1 AI boundary enforcement', () => {
 
   it('redacts sensitive customer text when creating a training correction', async () => {
     const service = 'synthetic-service'
-    await instance.db.prepare('INSERT INTO accounts(id,email,name,password_hash,salt,active,super_admin,created) VALUES (?,?,?,?,?,1,1,0)')
-      .bind('synthetic-founder', 'founder@example.test', 'Synthetic founder', '-', '-').run()
     await instance.db.prepare('INSERT INTO accounts(id,email,name,password_hash,salt,active,super_admin,created) VALUES (?,?,?,?,?,1,0,0)')
       .bind(service, 'service@example.test', 'Synthetic service user', '-', '-').run()
     await instance.db.prepare("INSERT INTO memberships VALUES (?,'nepmui','customer-service')").bind(service).run()
@@ -122,5 +122,41 @@ describe('D1 AI boundary enforcement', () => {
     expect(response.status).toBe(201)
     const draft = await response.json() as { id: string }
     expect(JSON.stringify(await store.get('training', draft.id))).not.toContain(canary)
+  })
+
+  it('limits Playground resume to the owner and administrators without assigning legacy ownership', async () => {
+    const { DB } = await instance.app.getBindings<{ DB: D1Database }>()
+    const origin = 'https://ai-security.example.test'
+    const trainer = 'synthetic-trainer'
+    const owner = 'synthetic-owner'
+    for (const id of [trainer, owner]) {
+      await instance.db.prepare('INSERT INTO accounts(id,email,name,password_hash,salt,active,super_admin,created) VALUES (?,?,?,?,?,1,0,0)')
+        .bind(id, id + '@example.test', id, '-', '-').run()
+      await instance.db.prepare("INSERT INTO memberships VALUES (?,'nepmui','ai-trainer')").bind(id).run()
+    }
+    const request = async (actor: string, conversationId?: string, question = 'Synthetic follow-up') => {
+      const token = await createSession(DB, actor, 'nepmui')
+      return instance.app.dispatchFetch(origin + '/api/playground', {
+        method: 'POST', headers: { Origin: origin, Cookie: '__Host-studio=' + token, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question, conversationId }),
+      })
+    }
+    const created = await request(owner, undefined, privateTurn)
+    expect(created.status).toBe(200)
+    const { conversation } = await created.json() as { conversation: { id: string; data: { ownerId: string } } }
+    expect(conversation.data.ownerId).toBe(owner)
+    const denied = await request(trainer, conversation.id)
+    expect(denied.status).toBe(404)
+    expect(await denied.text()).not.toContain(canary)
+    expect((await request(owner, conversation.id)).status).toBe(200)
+    expect((await request('synthetic-founder', conversation.id)).status).toBe(200)
+    expect((await store.get('conversations', conversation.id))?.data.ownerId).toBe(owner)
+
+    const legacy = await store.create('conversations', {
+      title: 'Synthetic legacy thread', channel: 'playground', status: 'handover', messages: [],
+    })
+    expect((await request(owner, legacy!.id)).status).toBe(404)
+    expect((await request('synthetic-founder', legacy!.id)).status).toBe(200)
+    expect((await store.get('conversations', legacy!.id))?.data.ownerId).toBeUndefined()
   })
 })

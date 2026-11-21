@@ -161,6 +161,7 @@ for (const kind of ['knowledge', 'products', 'training'] as const) {
     const store = c.get('store')
     const current = await store.get(kind, c.req.param('id'))
     if (!current) return c.json({ error: 'missing' }, 404)
+    if (current.version!==version) return c.json({error:'conflict'},409)
     if (c.get('principal')?.role==='ai-trainer' && 'status' in data && (data.status!=='draft' || ('status' in current.data && current.data.status!=='draft'))) return c.json({ error:'forbidden' },403)
     if ('status' in data && 'status' in current.data) {
       const { status: previous, ...before } = current.data
@@ -181,6 +182,7 @@ for (const kind of ['knowledge', 'products', 'training'] as const) {
   app.delete(`/api/${kind}/:id`, async c => {
     const version = z.coerce.number().int().positive().parse(c.req.query('version'))
     const current=await c.get('store').get(kind,c.req.param('id'))
+    if (!current || current.version!==version) return c.json({error:'conflict'},409)
     if (c.get('principal')?.role==='ai-trainer' && current && 'status' in current.data && current.data.status!=='draft') return c.json({error:'forbidden'},403)
     return await c.get('store').remove(kind, c.req.param('id'), version)
       ? c.json({ ok: true }) : c.json({ error: 'conflict' }, 409)
@@ -197,6 +199,7 @@ app.post('/api/knowledge/:id/restore', async c => {
   const store = c.get('store')
   const current=await store.get('knowledge',id)
   if (!current) return c.json({error:'missing'},404)
+  if (current.version!==version) return c.json({error:'conflict'},409)
   if (c.get('principal')?.role==='ai-trainer' && current.data.status!=='draft') return c.json({error:'forbidden'},403)
   const snapshot = await store.snapshot(id, revision)
   if (!snapshot) return c.json({ error: 'missing' }, 404)
@@ -240,16 +243,23 @@ for (const kind of ['persona', 'models'] as const) {
 
 app.post('/api/playground', async c => {
   const input = chatInput.parse(await jsonBody(c.req.raw))
+  const user = c.get('principal')!
+  const previous = input.conversationId ? await c.get('store').get('conversations', input.conversationId) : undefined
+  if (input.conversationId && (previous?.data.channel !== 'playground' || previous.data.channelId !== input.channelId ||
+    (previous.data.ownerId !== user.id && user.role !== 'super-admin' && user.role !== 'brand-admin'))) {
+    return c.json({ error: 'missing' }, 404)
+  }
+  const access = previous && previous.data.ownerId !== user.id ? 'brand-admin' :
+    user.role === 'customer-service' ? 'customer-service' : 'ai-trainer'
   let store:Studio
-  try { store=await engineStore(c.env.DB,c.get('workspaceId'),input.channelId,input.agentId,currentActor(c.get('principal')!,c.get('demo'),c.get('principal')!.role==='customer-service'?'customer-service':'ai-trainer',c.get('workspaceId'))) }
+  try { store=await engineStore(c.env.DB,c.get('workspaceId'),input.channelId,input.agentId,currentActor(user,c.get('demo'),access,c.get('workspaceId'))) }
   catch { return c.json({ error:'missing' },404) }
-  const previous = input.conversationId ? await store.get('conversations', input.conversationId) : undefined
-  if (input.conversationId && (previous?.data.channel !== 'playground' || previous.data.channelId!==input.channelId)) return c.json({ error: 'missing' }, 404)
   const history = previous?.data.messages ?? []
   const result = await answer(store, c.env.WORKERS_AI_ENABLED === 'true' ? c.env.AI : undefined, input.question,
     history)
   const data: Data<'conversations'> = {
     title: previous?.data.title ?? input.question.slice(0, 160), channel: 'playground', channelId:input.channelId,
+    ownerId: previous ? previous.data.ownerId : user.id,
     status: result.reason === 'grounded' && previous?.data.status !== 'handover' ? 'answered' : 'handover',
     messages: [...history, { role: 'user' as const, text: input.question }, {
       role: 'assistant' as const, text: result.text, reason: result.reason, latency: result.latency, provider: result.provider, sources: result.references,
@@ -282,7 +292,8 @@ app.patch('/api/conversations/:id', async c => {
 
 app.delete('/api/conversations/:id', async c => {
   const version = z.coerce.number().int().positive().parse(c.req.query('version'))
-  return await deleteThread(c.env.DB, c.get('workspaceId'), c.req.param('id'), version)
+  const brand=c.get('workspaceId'),actor=currentActor(c.get('principal')!,c.get('demo'),'brand-admin',brand)
+  return await deleteThread(c.env.DB,brand,c.req.param('id'),version,actor)
     ? c.json({ ok: true }) : c.json({ error: 'conflict' }, 409)
 })
 app.post('/api/conversations/:id/training', async c => {
@@ -303,11 +314,15 @@ app.post('/api/conversations/:id/training', async c => {
 app.get('/api/privacy', async c => c.json({ days: await retentionDays(c.env.DB, c.get('workspaceId')) }))
 app.put('/api/privacy', async c => {
   const { days } = z.object({ days: z.number().int().min(1).max(365) }).parse(await jsonBody(c.req.raw))
-  await c.env.DB.prepare('INSERT INTO retention VALUES (?,?) ON CONFLICT(brand_id) DO UPDATE SET days=excluded.days')
-    .bind(c.get('workspaceId'), days).run()
-  return c.json({ days })
+  const brand=c.get('workspaceId'),actor=currentActor(c.get('principal')!,c.get('demo'),'brand-admin',brand)
+  const saved=await c.env.DB.prepare(`INSERT INTO retention SELECT ?,? WHERE ${actor.sql}
+    ON CONFLICT(brand_id) DO UPDATE SET days=excluded.days RETURNING days`).bind(brand,days,...actor.bindings).first()
+  return saved ? c.json({ days }) : c.json({error:'forbidden'},403)
 })
-app.post('/api/privacy/purge', async c => c.json({ count: await purge(c.env.DB, c.get('workspaceId')) }))
+app.post('/api/privacy/purge', async c => {
+  const brand=c.get('workspaceId'),actor=currentActor(c.get('principal')!,c.get('demo'),'brand-admin',brand)
+  return c.json({ count:await purge(c.env.DB,brand,actor) })
+})
 
 app.get('/api/integrations', c => c.json({
   messenger: c.env.STUDIO_ENV !== 'staging' && c.env.MESSENGER_INGEST === 'true' && !!(c.env.META_PAGE_ID && c.env.META_APP_SECRET && c.env.META_VERIFY_TOKEN),
@@ -317,8 +332,9 @@ app.post('/api/integrations/messenger/mock', async c => {
   const payload=await jsonBody(c.req.raw)
   const items=channelAdapters.messenger.decode(payload,'100')
   const brand=c.get('workspaceId')
-  const accepted=await receiveBatch(c.env.DB,brand,'messenger-mock',items,true)
-  const sent=await drainMessenger({ ...c.env,BRAND_ID:brand },'messenger-mock')
+  const actor=currentActor(c.get('principal')!,c.get('demo'),'brand-admin',brand)
+  const accepted=await receiveBatch(c.env.DB,brand,'messenger-mock',items,true,undefined,actor)
+  const sent=accepted ? await drainMessenger({ ...c.env,BRAND_ID:brand },'messenger-mock') : 0
   return c.json({ accepted,duplicate:items.length-accepted,sent })
 })
 app.post('/api/channels/:id/mock',async c=>{
@@ -326,9 +342,11 @@ app.post('/api/channels/:id/mock',async c=>{
   if (!registered || registered.kind!=='messenger' || !registered.mock) return c.json({ error:'missing' },404)
   if (registered.state!=='connected' || registered.paused) return c.json({ error:'channel_paused' },409)
   const items=channelAdapters.messenger.decode(await jsonBody(c.req.raw),registered.external_id)
-  const accepted=await receiveBatch(c.env.DB,brand,'messenger-mock',items,true,registered.id)
-  if (accepted) await c.env.DB.prepare('UPDATE channels SET last_event=? WHERE brand_id=? AND id=?').bind(Date.now(),brand,registered.id).run()
-  const sent=await drainMessenger({ ...c.env,BRAND_ID:brand },'messenger-mock',2,fetch,registered.id)
+  const actor=currentActor(c.get('principal')!,c.get('demo'),'brand-admin',brand)
+  const accepted=await receiveBatch(c.env.DB,brand,'messenger-mock',items,true,registered.id,actor)
+  if (accepted) await c.env.DB.prepare(`UPDATE channels SET last_event=? WHERE brand_id=? AND id=? AND ${actor.sql}`)
+    .bind(Date.now(),brand,registered.id,...actor.bindings).run()
+  const sent=accepted ? await drainMessenger({ ...c.env,BRAND_ID:brand },'messenger-mock',2,fetch,registered.id) : 0
   return c.json({ accepted,duplicate:items.length-accepted,sent })
 })
 app.get(webhooks, async c => {

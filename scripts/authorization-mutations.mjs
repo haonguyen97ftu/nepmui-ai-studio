@@ -9,6 +9,7 @@ const mutants=[
  {id:'trainer-current-state',from:"(data.status!=='draft' || ('status' in current.data && current.data.status!=='draft'))",to:"data.status!=='draft'"},
 ]
 mutants.push({id:'current-super-admin-authority',path:authPath,from:"  const privileges = {",to:"  return {sql:'1',bindings:[] as (string|null)[]}\n  const privileges = {",test:'tests/auth-lifecycle.test.ts'})
+mutants.push({id:'validated-state-version',from:"if (current.version!==version) return c.json({error:'conflict'},409)",to:'',test:'tests/state-race.test.ts'})
 const results=[]
 function run(args){return spawnSync('npm',args,{encoding:'utf8',maxBuffer:4*1024*1024})}
 try{

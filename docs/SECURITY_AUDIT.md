@@ -52,6 +52,7 @@ Application-created tables through migration 0005 are listed below. SQLite FTS5 
 | 0003 | inference_reservations | Atomic admission inputs; trigger checks and accounts usage |
 | 0003 | scheduler_cursors | Global retention/delivery rotation positions |
 | 0004 | founder_invariant_check | Transient validation table created and dropped during atomic migration; contains no application data |
+| 0005 | replay_policy | Singleton migration cutoff; five-minute live ingress quarantine prevents legacy replay including clock skew |
 | 0005 | event_tombstones | Workspace/channel SHA256 event digest and 48-hour expiry; independent of deleted customer content |
 
 Database trigger inventory: record_created/updated/deleted create revision history; studio_search_insert/update/delete maintain FTS; reserve_inference enforces/account reservations; protect_last_superadmin and migration 0004 require_active_founder_on_insert/update plus protect_last_superadmin_delete preserve founder authority; pause_archived_workspace/pause_inactive_workspace/pause_channel_jobs stop queued live operations; admit_delivery_once atomically claims replay tombstones. Migration 0003 extends initial table structures; migration 0005 adds deliveries.event_hash. Replay tombstones intentionally survive conversation deletion and are purged only after expiry.
@@ -67,7 +68,7 @@ Database trigger inventory: record_created/updated/deleted create revision histo
 | Meta webhook | Public verification GET and signed raw-body POST; batch admission and replay checks | Local synthetic signatures/events only |
 | Meta Graph | Page ownership verification and outbound message requests with scoped decrypted token | No live ownership verification or send |
 | D1 | SQL batch/trigger consistency, workspace predicates, migrations and FTS | Disposable local database; remote restore and schema not inspected |
-| Static assets/browser | SPA through Cloudflare assets; API runWorkerFirst, external images explicit links | External link navigation is user initiated |
+| Static assets/browser | SPA through Cloudflare assets; API runWorkerFirst, product images explicit links; administrator-configured logos remain automatic (WEB-03) | External link navigation is user initiated |
 | CI/operations | npm registry install, official Actions, cf build, staging deploy/benchmark/backup/migration scripts | SHA pins reviewed; operational account scopes and actual hosted backup recoverability pending |
 
 ## Frontend permission mapping

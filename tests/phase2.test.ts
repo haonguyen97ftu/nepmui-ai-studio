@@ -34,6 +34,7 @@ beforeAll(async () => {
   expect(claim.status).toBe(201)
   cookie=claim.headers.get('Set-Cookie')!.split(';')[0]
   const { DB } = await instance.app.getBindings<{ DB: D1Database }>()
+  await DB.prepare('UPDATE replay_policy SET live_not_before=0 WHERE id=1').run()
   const store = studio(DB, 'nepmui')
   for (const item of evaluation.knowledge) await store.create('knowledge', contracts.knowledge.parse(item))
   for (const item of evaluation.products) await store.create('products', contracts.products.parse(item))

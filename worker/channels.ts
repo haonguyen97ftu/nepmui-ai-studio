@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import type { Data } from './contracts'
-import { digest } from './accounts'
+import { digest, type currentActor } from './accounts'
 
 export type Inbound = { id: string; sender: string; text: string; timestamp?: number }
 export interface ChannelAdapter {
@@ -51,7 +51,7 @@ export async function signatureValid(secret: string, bytes: Uint8Array<ArrayBuff
   return crypto.subtle.verify('HMAC', key, expected, bytes)
 }
 
-export async function receiveBatch(db: D1Database, brand: string, channel: ChannelAdapter['channel'], events: Inbound[], queue: boolean, connectionId?: string) {
+export async function receiveBatch(db: D1Database, brand: string, channel: ChannelAdapter['channel'], events: Inbound[], queue: boolean, connectionId?: string, authorization?: ReturnType<typeof currentActor>) {
   if (!events.length) return 0
   const scope=connectionId ? channel+'/'+connectionId : channel
   const now = Date.now()
@@ -72,7 +72,8 @@ export async function receiveBatch(db: D1Database, brand: string, channel: Chann
     db.prepare(`INSERT INTO deliveries (brand_id,channel,external_id,at,thread_id,batch_key,event_hash)
       SELECT ?,?,json_extract(value,'$.id'),?,json_extract(value,'$.thread'),?,json_extract(value,'$.eventHash') FROM json_each(?) WHERE EXISTS(SELECT 1 FROM brands WHERE id=? AND active=1)
       AND (? IS NULL OR EXISTS(SELECT 1 FROM channels WHERE brand_id=? AND id=? AND state='connected' AND paused=0 AND mock=? AND (mock=1 OR verified=1)))
-      ON CONFLICT DO NOTHING RETURNING external_id`).bind(brand, scope, now, batch, input,brand,connectionId??null,brand,connectionId??null,Number(channel==='messenger-mock')),
+      AND (?<>'messenger' OR EXISTS(SELECT 1 FROM replay_policy WHERE id=1 AND ? >= live_not_before AND json_extract(value,'$.received')>=live_not_before))
+      AND ${authorization?.sql??'1'} ON CONFLICT DO NOTHING RETURNING external_id`).bind(brand, scope, now, batch, input,brand,connectionId??null,brand,connectionId??null,Number(channel==='messenger-mock'),channel,now,...(authorization?.bindings??[])),
     db.prepare(`WITH accepted AS (${accepted}),
       ordered AS (
         SELECT *,row_number() OVER (PARTITION BY thread_id ORDER BY seq DESC) position FROM accepted

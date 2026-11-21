@@ -21,6 +21,7 @@ beforeAll(async () => {
   const instance = await runtime({ ADMIN_SECRET: secret, AUTH_PEPPER: 'b'.repeat(64), META_APP_SECRET: meta, META_VERIFY_TOKEN: verify, META_PAGE_ID: '100', MESSENGER_INGEST: 'true' })
   app = instance.app
   db = instance.db
+  await db.prepare('UPDATE replay_policy SET live_not_before=0 WHERE id=1').run()
   const response = await request('session', 'POST', { token: secret }, false)
   expect(response.status).toBe(200)
   const legacy=response.headers.get('Set-Cookie')!.split(';')[0]

@@ -25,6 +25,7 @@ export const contracts = {
   conversations: z.object({
     title: short, channel: z.enum(['playground', 'messenger', 'messenger-mock', 'instagram', 'website']),
     channelId: z.string().max(160).optional(),
+    ownerId: z.string().max(160).optional(),
     status: z.enum(['answered', 'handover', 'resolved']), paused: z.boolean().optional(), messages: z.array(message).max(40),
   }),
 }

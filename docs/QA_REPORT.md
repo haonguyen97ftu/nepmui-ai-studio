@@ -119,18 +119,20 @@ The [JSON Mode documentation](https://developers.cloudflare.com/workers-ai/featu
 
 ## NM-AI-04.2 local security validation
 
-Discovery baseline: `816b3e78baa2b435a3743a397ddd7e633014ab63`. Final candidate SHA and complete immutable verification are pending root review. Local targeted evidence reported by owners: authentication/bootstrap/platform 49/49; replay/infrastructure combined 27/27; dependency audit production/full zero advisories. Frontend targeted ESLint passed. Initial frontend browser launch was blocked by a missing Chromium executable; root is preparing the browser environment. An intermediate typecheck failed during an in-progress server edit and is not a final result.
+Discovery baseline: `816b3e78baa2b435a3743a397ddd7e633014ab63`. The exact replacement candidate SHA and independent immutable conclusions are recorded in PR #1. Local targeted evidence reported by owners: authentication/bootstrap/platform 49/49; replay/infrastructure combined 27/27; dependency audit production/full zero advisories. Frontend targeted ESLint passed. Initial frontend browser launch was blocked by a missing Chromium executable; the prepared system Chromium run subsequently passed. An intermediate typecheck failed during an in-progress server edit and is not a final result.
 
 Central authorization evidence covers 65 endpoints × seven principals = 455 baseline policy combinations plus constraint/state cases. HTTP gate allow/deny tests, real handler denials and mutation checks exercise enforcement; this is not a claim that every allowed business handler has exhaustive success coverage. AI security regressions use synthetic providers and no hosted inference. Required npm ci/lint/typecheck/build:worker/test/test:e2e and final mutation results must be recorded by the root after all edits. See SECURITY_FINDINGS.md and RELEASE_READINESS.md for residual hosted boundaries.
 
 ### Consolidated local NM-AI-04.2 evidence
 
-- 577 unit/integration tests passed, preserving all 98 predecessor tests; 465 cases in the authorization suite cover 65 route policies × 7 roles plus inventory, resource states, search/pagination and foreign/deleted IDs. Allowed admission is exercised through the production middleware; allowed handler workflows have separate integration coverage, not a claim that every possible payload was tested.
+- 582 unit/integration tests passed, preserving all 98 predecessor tests; 465 cases in the authorization suite cover 65 route policies × 7 roles plus inventory, resource states, search/pagination and foreign/deleted IDs. Allowed admission is exercised through the production middleware; allowed handler workflows have separate integration coverage, not a claim that every possible payload was tested.
 - 15 Playwright scenarios passed on desktop/iPhone, with 3 pre-existing project-specific skips. Includes explicit external-image navigation without automatic requests.
 - Lint, typecheck, normal Worker build, staging Worker build and migration report passed.
 - Original 13 benchmark scenarios and 2 multi-turn assertions are unchanged. Actual hosted benchmark was not rerun for this candidate, as hosted changes/inference are prohibited.
-- Mutation gates weaken route-role enforcement, published-only filtering, Trainer current-state enforcement and current Super Admin authority. The gate requires assertion failures, stores synthetic logs and restores source/builds. Final experiment outcome and immutable reviewer conclusions are recorded in PR #1 against the candidate SHA.
+- Mutation gates weaken route-role enforcement, published-only filtering, Trainer current-state enforcement and current Super Admin authority. The gate requires assertion failures, stores synthetic logs and restores source/builds. Final five-experiment outcome and immutable reviewer conclusions are recorded in PR #1 against the candidate SHA.
 
 No hosted deployment, remote D1 change, real Messenger activation, merge or paid dependency was performed.
 
-Final mutation experiment: 4/4 mutations killed by assertion failures; restored source and normal Worker build passed. A narrower role-only mutation was initially redundant with session-generation fencing and was replaced with removal of the full current-authority predicate; no assertion was relaxed.
+Final mutation experiment: 5/5 mutations killed by assertion failures; restored source and normal Worker build passed. A narrower role-only mutation was initially redundant with session-generation fencing and was replaced with removal of the full current-authority predicate; no assertion was relaxed.
+
+Replacement-candidate validation: 582 tests in 11 files passed; 15 browser scenarios passed, 3 existing intentional skips; 5/5 authorization mutations killed; lint/typecheck and both Worker builds passed; migration0003–0005 preservation report passed with zero FK violations. This supersedes first-candidate results.
