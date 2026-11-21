@@ -1,147 +1,138 @@
 name: Deploy Studio staging
 on:
   workflow_dispatch:
+    inputs:
+      candidate:
+        description: Exact independently accepted application SHA
+        required: true
+        type: string
+      phase:
+        description: Release or hosted acceptance
+        required: true
+        type: choice
+        options: [release, acceptance]
+      quiesced:
+        description: Staging writes and mock processing are quiesced
+        required: true
+        default: false
+        type: boolean
   push:
     branches: [ops/nm-ai-deploy-01]
     paths: ['.github/staging-deploy.request']
 permissions:
   contents: read
+  actions: read
 concurrency:
   group: nepmui-ai-studio-staging
   cancel-in-progress: false
 jobs:
-  deploy:
+  staging:
     if: github.repository == 'haonguyen97ftu/nepmui-ai-studio' && github.ref == 'refs/heads/ops/nm-ai-deploy-01'
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 30
     environment:
       name: nepmui-staging
       url: https://nepmui-ai-studio-staging.haonguyen-drew.workers.dev
     env:
+      OPS_DIR: ${{ github.workspace }}/release-ops
+      APP_DIR: ${{ github.workspace }}/candidate
       CLOUDFLARE_ACCOUNT_ID: 3bdb3fba2669802b6102e0f1953294fe
       STUDIO_STAGING_D1_ID: 71103118-e36b-4b55-a64d-a8f1d7974903
+      STUDIO_D1_ID: ${{ vars.STUDIO_PRODUCTION_D1_ID }}
       STUDIO_BENCHMARK_URL: https://nepmui-ai-studio-staging.haonguyen-drew.workers.dev
+      STUDIO_MESSENGER_INGEST: 'false'
+      STUDIO_MESSENGER_OUTBOUND: 'false'
+      STAGING_APPROVED_CANDIDATE_SHA: ${{ vars.STAGING_APPROVED_CANDIDATE_SHA }}
+      REQUESTED_CANDIDATE: ${{ inputs.candidate }}
+      REQUESTED_PHASE: ${{ inputs.phase }}
+      REQUESTED_QUIESCED: ${{ inputs.quiesced }}
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
-          ref: 8af07112fb383ea08dddc010d80dbf09196cc6a0
+          path: release-ops
           persist-credentials: false
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
         with:
           node-version: 24
-      - run: npm ci
-      - run: npm run build:staging
-      - name: Deploy reviewed staging release
+      - name: Verify release approval and exact Studio CI
+        id: gate
         env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          STUDIO_BENCHMARK_ADMIN_SECRET: ${{ secrets.STAGING_ADMIN_SECRET }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node "$OPS_DIR/ops/staging-release.mjs" check
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: ${{ steps.gate.outputs.candidate }}
+          path: candidate
+          persist-credentials: false
+      - name: Verify checkout and install locked dependencies
+        working-directory: candidate
+        env:
+          EXPECTED_SHA: ${{ steps.gate.outputs.candidate }}
         run: |
           set -euo pipefail
-          test -n "$CLOUDFLARE_API_TOKEN" || { echo "::error::Missing staging Cloudflare API token"; exit 1; }
-          [[ "$STUDIO_BENCHMARK_ADMIN_SECRET" =~ ^[a-fA-F0-9]{64}$ ]] || { echo "::error::Missing or invalid staging administrator secret"; exit 1; }
-          umask 077
-          STUDIO_STAGING_SECRETS_FILE="$(mktemp)"
-          export STUDIO_STAGING_SECRETS_FILE
-          trap 'rm -f "$STUDIO_STAGING_SECRETS_FILE"' EXIT
-          node -e 'require("node:fs").writeFileSync(process.env.STUDIO_STAGING_SECRETS_FILE, JSON.stringify({ ADMIN_SECRET: process.env.STUDIO_BENCHMARK_ADMIN_SECRET }))'
-          unset STUDIO_BENCHMARK_ADMIN_SECRET
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          npm ci
+      - name: Build and verify the staging bundle
+        if: steps.gate.outputs.phase == 'release'
+        working-directory: candidate
+        env:
+          EXPECTED_SHA: ${{ steps.gate.outputs.candidate }}
+        run: |
+          set -euo pipefail
+          node -e 'require("node:fs").writeFileSync("public/studio-release.json", JSON.stringify({sha: process.env.EXPECTED_SHA}), {flag:"wx"})'
+          npm run build:staging
+          node "$OPS_DIR/ops/staging-hosted.mjs" build
+      - name: Prepare protected runtime bindings
+        if: steps.gate.outputs.phase == 'release'
+        env:
+          ADMIN_SECRET: ${{ secrets.STAGING_ADMIN_SECRET }}
+          AUTH_PEPPER: ${{ secrets.STAGING_AUTH_PEPPER }}
+          CHANNEL_ENCRYPTION_KEY: ${{ secrets.STAGING_CHANNEL_ENCRYPTION_KEY }}
+          STAGING_RECOVERY_KEY: ${{ secrets.STAGING_RECOVERY_KEY }}
+        run: node "$OPS_DIR/ops/staging-hosted.mjs" secrets
+      - name: Verify the staging recovery point
+        if: steps.gate.outputs.phase == 'release'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          STAGING_RECOVERY_KEY: ${{ secrets.STAGING_RECOVERY_KEY }}
+        run: node "$OPS_DIR/ops/staging-release.mjs" backup
+      - name: Persist encrypted staging recovery evidence
+        id: recovery
+        if: steps.gate.outputs.phase == 'release'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: studio-staging-recovery-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/studio-recovery/recovery.aes256gcm
+          if-no-files-found: error
+          retention-days: 7
+      - name: Apply and verify staged D1 migrations
+        id: migration
+        if: steps.gate.outputs.phase == 'release'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          STAGING_RECOVERY_KEY: ${{ secrets.STAGING_RECOVERY_KEY }}
+          RECOVERY_ARTIFACT_ID: ${{ steps.recovery.outputs.artifact-id }}
+        run: node "$OPS_DIR/ops/staging-release.mjs" migrate
+      - name: Deploy reviewed staging release
+        if: steps.gate.outputs.phase == 'release'
+        working-directory: candidate
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          STUDIO_PLATFORM_MIGRATION_READY: ${{ steps.migration.outputs.readiness }}
+          STUDIO_STAGING_SECRETS_FILE: ${{ runner.temp }}/studio-runtime-secrets.json
+        run: |
+          set -euo pipefail
+          test "$STUDIO_PLATFORM_MIGRATION_READY" = 0005_webhook_replay.sql
           npm run deploy:staging
-      - name: Verify hosted API and configure bounded Workers AI
+      - name: Verify the hosted candidate and signed-out gates
+        run: node "$OPS_DIR/ops/staging-hosted.mjs" smoke
+      - name: Run scoped account acceptance and the 13+2 benchmark
+        if: steps.gate.outputs.phase == 'acceptance'
         env:
-          STUDIO_BENCHMARK_ADMIN_SECRET: ${{ secrets.STAGING_ADMIN_SECRET }}
-        run: |
-          node --input-type=module <<'JS'
-          import assert from 'node:assert/strict'
-          const origin = process.env.STUDIO_BENCHMARK_URL
-          let cookie
-          async function api(path, method = 'GET', payload) {
-            return fetch(origin + '/api/' + path, {
-              method,
-              redirect: 'error',
-              signal: AbortSignal.timeout(15000),
-              headers: { Origin: origin, 'Content-Type': 'application/json', ...(cookie ? { Cookie: cookie } : {}) },
-              body: payload === undefined ? undefined : JSON.stringify(payload)
-            })
-          }
-          let signedOut
-          for (let attempt = 0; attempt < 12; attempt++) {
-            try {
-              const home = await fetch(origin, { redirect: 'error', signal: AbortSignal.timeout(8000) })
-              const session = await api('session')
-              if (home.ok && session.ok) {
-                const state = await session.json()
-                if (state.staging === true) {
-                  signedOut = state
-                  break
-                }
-              }
-            } catch {
-              // Initial workers.dev routing can take time to propagate.
-            }
-            await new Promise(resolve => setTimeout(resolve, 5000))
-          }
-          assert.ok(signedOut, 'The deployed staging URL did not become ready')
-          assert.equal(signedOut.staging, true)
-          assert.equal(signedOut.authenticated, false)
-          assert.equal(signedOut.brand, undefined)
-          for (const route of ['overview', 'audit', 'knowledge', 'products', 'training', 'conversations', 'persona', 'models', 'privacy', 'integrations']) {
-            assert.equal((await api(route)).status, 401, route)
-          }
-          assert.equal((await api('webhooks/messenger')).status, 403)
-          assert.equal((await api('webhooks/messenger', 'POST', {})).status, 403)
-          const login = await api('session', 'POST', { token: process.env.STUDIO_BENCHMARK_ADMIN_SECRET })
-          assert.equal(login.status, 200, 'Administrator login')
-          const setCookie = login.headers.get('set-cookie') ?? ''
-          for (const flag of ['Secure', 'HttpOnly', 'SameSite=Strict']) assert.ok(setCookie.includes(flag), flag)
-          cookie = setCookie.split(';')[0]
-          try {
-            for (const route of ['knowledge', 'products', 'training']) assert.equal((await api(route)).status, 200, route)
-            const integrations = await (await api('integrations')).json()
-            assert.equal(integrations.messenger, false)
-            assert.equal(integrations.outbound, false)
-            const { aiEnabled, version, data } = await (await api('models')).json()
-            assert.equal(aiEnabled, true)
-            const desired = { provider: 'workers-ai', model: '@cf/meta/llama-3.3-70b-instruct-fp8-fast', dailyLimit: 40, dailyNeurons: 6000 }
-            if (Object.entries(desired).some(([key, value]) => data[key] !== value)) {
-              assert.equal((await api('models', 'PUT', { version, data: desired })).status, 200)
-            }
-            console.log('Hosted authentication, admin API, Messenger disabled and Workers AI binding verified.')
-          } finally {
-            assert.equal((await api('session', 'DELETE')).status, 200)
-            assert.equal((await api('knowledge')).status, 401, 'Revoked session')
-          }
-          JS
-      - name: Run Vietnamese Workers AI benchmark
-        env:
-          STUDIO_BENCHMARK_ADMIN_SECRET: ${{ secrets.STAGING_ADMIN_SECRET }}
-        run: npm run benchmark:staging
-
-      - name: Restore standard staging inference limits
+          STUDIO_BENCHMARK_EMAIL: ${{ secrets.STAGING_BENCHMARK_EMAIL }}
+          STUDIO_BENCHMARK_PASSWORD: ${{ secrets.STAGING_BENCHMARK_PASSWORD }}
+          STUDIO_BENCHMARK_WORKSPACE: ${{ vars.STAGING_BENCHMARK_WORKSPACE }}
+        run: node "$OPS_DIR/ops/staging-hosted.mjs" acceptance
+      - name: Remove private runner files
         if: always()
-        env:
-          STUDIO_BENCHMARK_ADMIN_SECRET: ${{ secrets.STAGING_ADMIN_SECRET }}
-        run: |
-          node --input-type=module <<'JS'
-          import assert from 'node:assert/strict'
-          const origin = process.env.STUDIO_BENCHMARK_URL
-          let cookie
-          async function api(path, method = 'GET', payload) {
-            const response = await fetch(origin + '/api/' + path, {
-              method, redirect: 'error', signal: AbortSignal.timeout(15000),
-              headers: { Origin: origin, 'Content-Type': 'application/json', ...(cookie ? { Cookie: cookie } : {}) },
-              body: payload === undefined ? undefined : JSON.stringify(payload)
-            })
-            assert.ok(response.ok, `Staging limit restoration failed (HTTP ${response.status})`)
-            if (path === 'session' && method === 'POST') cookie = response.headers.get('set-cookie')?.split(';')[0]
-            return response.json()
-          }
-          await api('session', 'POST', { token: process.env.STUDIO_BENCHMARK_ADMIN_SECRET })
-          try {
-            assert.equal((await api('session')).staging, true)
-            const { data, version } = await api('models')
-            await api('models', 'PUT', { version, data: { ...data, dailyLimit: 20, dailyNeurons: 4000 } })
-            console.log('Restored staging limits to 20 calls / 4000 reserved Neurons; usage counters unchanged.')
-          } finally {
-            if (cookie) await api('session', 'DELETE')
-          }
-          JS
+        run: rm -f -- "$RUNNER_TEMP/studio-runtime-secrets.json" "$RUNNER_TEMP/studio-recovery/recovery.aes256gcm"
