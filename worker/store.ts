@@ -1,11 +1,13 @@
 import { and, desc, eq, sql } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/d1'
 import { brands, records, revisions } from './schema'
-import { settings, type Data, type Entry, type Kind } from './contracts'
+import { settings, type Data, type Entry, type Kind, type SourceRef } from './contracts'
 import { matchExpression, retrievalExpression } from './retrieval'
 
-export function studio(binding: D1Database, brand: string, context: { channelId?: string; persona?: Data<'persona'>; model?: Data<'models'>['model'] } = {}) {
+export function studio(binding: D1Database, brand: string, context: { channelId?: string; persona?: Data<'persona'>; model?: Data<'models'>['model']; authorization?: {sql:string;bindings:(string|null)[]} } = {}) {
   const db = drizzle(binding)
+  const authorization=context.authorization
+  const guard=authorization ? sql.join(authorization.sql.split('?').flatMap((part,index)=>index<authorization.bindings.length ? [sql.raw(part),sql`${authorization.bindings[index]}`] : [sql.raw(part)]),sql.raw('')) : undefined
   const scope = (kind: Kind) => and(eq(records.brand, brand), eq(records.kind, kind))
   const key = (kind: Kind, id: string) => and(scope(kind), eq(records.id, id))
   const channelScope = (mode?: 'test' | 'live') => {
@@ -24,8 +26,8 @@ export function studio(binding: D1Database, brand: string, context: { channelId?
     rename: async (name: string) => {
       const now = Date.now()
       await binding.batch([
-        binding.prepare('UPDATE brands SET name=? WHERE id=? AND active=1').bind(name, brand),
-        binding.prepare("INSERT INTO revisions VALUES (?, ?, 'brand', ?, 'update', json_object('name',?), ?)").bind(brand, crypto.randomUUID(), brand, name, now),
+        binding.prepare(`UPDATE brands SET name=? WHERE id=? AND active=1 AND ${authorization?.sql??'1'}`).bind(name, brand,...(authorization?.bindings??[])),
+        binding.prepare("INSERT INTO revisions SELECT ?, ?, 'brand', ?, 'update', json_object('name',?), ? WHERE changes()=1").bind(brand, crypto.randomUUID(), brand, name, now),
       ])
     },
     get,
@@ -44,48 +46,72 @@ export function studio(binding: D1Database, brand: string, context: { channelId?
         .orderBy(desc(records.updated), records.id).limit(51).offset(offset)).map(decode<K>)
     },
     async create<K extends Kind>(kind: K, data: Data<K>, id = crypto.randomUUID() as string) {
-      const [row] = await db.insert(records).values({ brand, kind, id, data: JSON.stringify(data), updated: Date.now() })
-        .onConflictDoNothing().returning()
-      return row && decode<K>(row)
+      const row=await binding.prepare(`INSERT INTO records(brand_id,kind,id,data,updated) SELECT ?,?,?,?,? WHERE ${authorization?.sql??'1'} ON CONFLICT DO NOTHING RETURNING brand_id AS brand,kind,id,data,updated,version`)
+        .bind(brand,kind,id,JSON.stringify(data),Date.now(),...(authorization?.bindings??[])).first<typeof records.$inferSelect>()
+      if (!row) throw new RangeError('write_conflict')
+      return decode<K>(row)
     },
     async importDrafts(items: Data<'knowledge'>[]) {
       const now = Date.now()
-      await binding.batch(items.map(item => binding.prepare('INSERT INTO records (brand_id,kind,id,data,updated) VALUES (?,?,?,?,?)')
-        .bind(brand, 'knowledge', crypto.randomUUID(), JSON.stringify(item), now)))
+      await binding.batch(items.map(item => binding.prepare(`INSERT INTO records (brand_id,kind,id,data,updated) SELECT ?,?,?,?,? WHERE ${authorization?.sql??'1'}`)
+        .bind(brand, 'knowledge', crypto.randomUUID(), JSON.stringify(item), now,...(authorization?.bindings??[]))))
     },
     async update<K extends Kind>(kind: K, id: string, data: Data<K>, version: number) {
       const [row] = await db.update(records).set({ data: JSON.stringify(data), version: sql`${records.version}+1`, updated: Date.now() })
-        .where(and(key(kind, id), eq(records.version, version))).returning()
+        .where(and(key(kind, id), eq(records.version, version),guard)).returning()
       return row && decode<K>(row)
     },
+    async savePlayground(data: Data<'conversations'>, refs: SourceRef[], previous?: Pick<Entry<'conversations'>, 'id' | 'version'>) {
+      const current = `EXISTS(SELECT 1 FROM brands WHERE id=? AND active=1)
+        AND NOT EXISTS(SELECT 1 FROM json_each(?) ref WHERE NOT EXISTS(
+          SELECT 1 FROM records source WHERE source.brand_id=?
+          AND source.id=json_extract(ref.value,'$.id') AND source.kind=json_extract(ref.value,'$.kind')
+          AND source.version=json_extract(ref.value,'$.version')
+          AND (source.kind='products' OR json_extract(source.data,'$.status')='published'))) AND ${authorization?.sql??'1'}`
+      const guard = [brand, JSON.stringify(refs), brand,...(authorization?.bindings??[])]
+      const payload = JSON.stringify(data)
+      const now = Date.now()
+      const query = previous
+        ? binding.prepare(`UPDATE records SET data=?,updated=?,version=version+1
+          WHERE brand_id=? AND kind='conversations' AND id=? AND version=? AND ${current} RETURNING *`)
+          .bind(payload, now, brand, previous.id, previous.version, ...guard)
+        : binding.prepare(`INSERT INTO records(brand_id,kind,id,data,updated)
+          SELECT ?,'conversations',?,?,? WHERE ${current} RETURNING *`)
+          .bind(brand, crypto.randomUUID(), payload, now, ...guard)
+      const row = await query.first<{ id: string; data: string; version: number; updated: number }>()
+      return row ? { id: row.id, version: row.version, updated: row.updated, data: JSON.parse(row.data) as Data<'conversations'> } : undefined
+    },
     async remove(kind: Kind, id: string, version: number) {
-      return (await db.delete(records).where(and(key(kind, id), eq(records.version, version))).returning()).length > 0
+      return (await db.delete(records).where(and(key(kind, id), eq(records.version, version),guard)).returning()).length > 0
     },
     async publishCorrection(entry: Entry<'training'>) {
       const { id, data, version } = entry
       const now = Date.now()
       const knowledge = JSON.stringify({ title: data.title, body: data.body, category: 'Huấn luyện', status: 'published' })
       const result = await binding.batch([
-        binding.prepare("INSERT INTO records (brand_id,kind,id,data,updated) SELECT brand_id,'knowledge',?, ?, ? FROM records WHERE brand_id=? AND kind='training' AND id=? AND version=? AND json_extract(data,'$.status')='approved' RETURNING id")
-          .bind(crypto.randomUUID(), knowledge, now, brand, id, version),
-        binding.prepare("UPDATE records SET data=json_set(data,'$.status','published'), version=version+1, updated=? WHERE brand_id=? AND kind='training' AND id=? AND version=? AND json_extract(data,'$.status')='approved'")
+        binding.prepare(`INSERT INTO records (brand_id,kind,id,data,updated) SELECT brand_id,'knowledge',?, ?, ? FROM records WHERE brand_id=? AND kind='training' AND id=? AND version=? AND json_extract(data,'$.status')='approved' AND ${authorization?.sql??'1'} RETURNING id`)
+          .bind(crypto.randomUUID(), knowledge, now, brand, id, version,...(authorization?.bindings??[])),
+        binding.prepare("UPDATE records SET data=json_set(data,'$.status','published'), version=version+1, updated=? WHERE brand_id=? AND kind='training' AND id=? AND version=? AND json_extract(data,'$.status')='approved' AND changes()=1")
           .bind(now, brand, id, version),
       ])
       return result[0].results.length === 1
     },
     audit: () => db.select().from(revisions).where(eq(revisions.brand, brand)).orderBy(desc(revisions.at), revisions.id).limit(50),
-    async reserve(day: string, callLimit: number, neuronLimit: number, estimate: number) {
+    async reserve(day: string, callLimit: number, neuronLimit: number, estimate: number, requireCurrentConfig = false) {
       // A single serialized D1 statement plus trigger reserves all three counters.
       // Each workspace is capped at half the account allocation, including channel overrides.
       const result = await binding.prepare(`INSERT INTO inference_reservations(brand_id,channel_id,day,neurons)
-        SELECT ?,?,?,? FROM platform_limits p WHERE p.id=1 AND ?>0 AND ?>=0
+        SELECT ?,?,?,? FROM platform_limits p
+        LEFT JOIN records config ON config.brand_id=? AND config.kind='models' AND config.id='config'
+        WHERE p.id=1 AND ?>0 AND ?>=0
+        AND (?=0 OR json_extract(config.data,'$.provider')='workers-ai')
         AND EXISTS(SELECT 1 FROM brands WHERE id=? AND active=1)
-        AND coalesce((SELECT calls FROM usage WHERE brand_id=? AND day=?),0)<min(?,p.calls/2)
-        AND coalesce((SELECT reserved_neurons FROM usage WHERE brand_id=? AND day=?),0)+?<=min(?,p.neurons/2)
+        AND coalesce((SELECT calls FROM usage WHERE brand_id=? AND day=?),0)<min(?,coalesce(json_extract(config.data,'$.dailyLimit'),?),p.calls/2)
+        AND coalesce((SELECT reserved_neurons FROM usage WHERE brand_id=? AND day=?),0)+?<=min(?,coalesce(json_extract(config.data,'$.dailyNeurons'),?),p.neurons/2)
         AND coalesce((SELECT calls FROM platform_usage WHERE day=?),0)<p.calls
-        AND coalesce((SELECT neurons FROM platform_usage WHERE day=?),0)+?<=p.neurons RETURNING id`)
-        .bind(brand,context.channelId??'playground',day,estimate,callLimit,estimate,brand,
-          brand,day,callLimit,brand,day,estimate,neuronLimit,day,day,estimate).all()
+        AND coalesce((SELECT neurons FROM platform_usage WHERE day=?),0)+?<=p.neurons AND ${authorization?.sql??'1'} RETURNING id`)
+        .bind(brand,context.channelId??'playground',day,estimate,brand,callLimit,estimate,Number(requireCurrentConfig),brand,
+          brand,day,callLimit,callLimit,brand,day,estimate,neuronLimit,neuronLimit,day,day,estimate,...(authorization?.bindings??[])).all()
       return result.results.length===1
     },
     async retrieve<K extends 'products' | 'knowledge'>(kind: K, query: string, browse = false) {
@@ -96,7 +122,9 @@ export function studio(binding: D1Database, brand: string, context: { channelId?
       const match = binding.prepare(`SELECT r.* FROM studio_search s JOIN records r
         ON r.brand_id=s.brand_id AND r.kind=s.kind AND r.id=s.record_id
         WHERE studio_search MATCH ? AND r.brand_id=? AND r.kind=? ${conditions}
-        ORDER BY bm25(studio_search,0,0,0,8,1), r.id LIMIT 8`).bind(terms, brand, kind)
+        ORDER BY CASE WHEN s.rowid IN (
+          SELECT rowid FROM studio_search WHERE studio_search MATCH ? AND brand_id=? AND kind=?
+        ) THEN 0 ELSE 1 END, r.id LIMIT 8`).bind(terms, brand, kind, 'title : (' + terms + ')', brand, kind)
       const fallback = binding.prepare(`SELECT r.* FROM records r WHERE r.brand_id=? AND r.kind=? ${conditions}
         ORDER BY r.updated DESC, r.id LIMIT 8`).bind(brand, kind)
       const matched = terms ? (await match.all<{ id: string; data: string; version: number; updated: number }>()).results : []

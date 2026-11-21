@@ -56,6 +56,7 @@ export async function purge(db: D1Database, brand: string) {
     db.prepare('DELETE FROM deliveries WHERE brand_id=? AND at<?').bind(brand,cutoff),
     db.prepare('DELETE FROM login_attempts WHERE brand_id=? AND expires<=?').bind(brand,now),
     db.prepare('DELETE FROM revoked_sessions WHERE brand_id=? AND expires<=?').bind(brand,now),
+    db.prepare('DELETE FROM event_tombstones WHERE brand_id=? AND expires<=?').bind(brand,now),
   ])
   return results[2].results.length
 }

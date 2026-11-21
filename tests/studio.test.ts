@@ -5,7 +5,9 @@ import { signPayload } from '../worker/channels'
 import { hex, newSession } from '../worker/security'
 import { studio, type Studio } from '../worker/store'
 import { models } from '../shared/models'
-import messenger from './fixtures/messenger.json'
+import messengerFixture from './fixtures/messenger.json'
+// Live webhook admission requires provider freshness; mock fixture assertions stay identical.
+const messenger={...messengerFixture,entry:messengerFixture.entry.map(entry=>({...entry,messaging:entry.messaging.map(event=>({...event,timestamp:Date.now()}))}))}
 
 const secret = 'studio-synthetic-auth-token-for-tests'
 const meta = 'studio-synthetic-meta-secret'

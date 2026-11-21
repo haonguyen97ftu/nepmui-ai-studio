@@ -154,8 +154,8 @@ it('retries explicit rate-limit rejections and never retries an ambiguous send',
 it('persists large signed-style batches with bounded per-thread history and deduplication', async () => {
   const { DB } = await instance.app.getBindings<{ DB: D1Database }>()
   const { receiveBatch } = await import('../worker/channels')
-  const first = Array.from({ length: 30 }, (_, index) => ({ id: 'incoming-' + index, sender: '999', text: 'Bản thử ' + index }))
-  const second = Array.from({ length: 30 }, (_, index) => ({ id: 'incoming-' + (index + 30), sender: '999', text: 'Bản thử ' + (index + 30) }))
+  const first = Array.from({ length: 30 }, (_, index) => ({ timestamp:Date.now(), id: 'incoming-' + index, sender: '999', text: 'Bản thử ' + index }))
+  const second = Array.from({ length: 30 }, (_, index) => ({ timestamp:Date.now(), id: 'incoming-' + (index + 30), sender: '999', text: 'Bản thử ' + (index + 30) }))
   expect(await receiveBatch(DB, 'nepmui', 'messenger', first, false)).toBe(30)
   expect(await receiveBatch(DB, 'nepmui', 'messenger', [...second, first[0]], false)).toBe(30)
   expect(await receiveBatch(DB, 'nepmui', 'messenger', second, false)).toBe(0)

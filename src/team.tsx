@@ -10,8 +10,8 @@ const roles=['brand-admin','ai-trainer','customer-service','viewer']
 export function Team({superAdmin,currentId}:{superAdmin:boolean;currentId:string}) {
   const list=useResource<{items:Account[]}>('accounts'),action=useAction(),[create,setCreate]=useState(false)
   return <><PageTitle kicker="QUẢN TRỊ TRUY CẬP" title="Thành viên & quyền" copy="Phân quyền theo không gian. Quyền Super Admin áp dụng trên toàn nền tảng."
-    action={<Button onClick={()=>setCreate(!create)}><Plus size={16}/> Thêm thành viên</Button>}/>
-    {create && <form className="card padded form-stack" onSubmit={event=>{
+    action={superAdmin?<Button onClick={()=>setCreate(!create)}><Plus size={16}/> Thêm thành viên</Button>:undefined}/>
+    {superAdmin && create && <form className="card padded form-stack" onSubmit={event=>{
       event.preventDefault();const form=new FormData(event.currentTarget)
       void action.run(async()=>{await api('accounts','POST',{name:form.get('name'),email:form.get('email'),password:form.get('password'),role:form.get('role'),superAdmin:form.get('superAdmin')==='on'});setCreate(false);list.refresh()},'Đã tạo tài khoản và quyền trong không gian này.')
     }}><h2>Tài khoản mới</h2><div className="field-grid"><label>Họ tên<input name="name" required maxLength={80}/></label><label>Email<input name="email" type="email" autoComplete="off" required/></label></div>

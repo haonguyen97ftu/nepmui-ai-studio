@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import type { Data } from './contracts'
+import { digest } from './accounts'
 
 export type Inbound = { id: string; sender: string; text: string; timestamp?: number }
 export interface ChannelAdapter {
@@ -56,17 +57,20 @@ export async function receiveBatch(db: D1Database, brand: string, channel: Chann
   const now = Date.now()
   const batch = crypto.randomUUID()
   const firstById = new Map<string, Inbound>()
-  for (const event of events) if (!firstById.has(event.id)) firstById.set(event.id, event)
-  const input = JSON.stringify([...firstById.values()].map(({ id, sender, text, timestamp }) => ({
-    id, sender, text, thread: scope + ':' + sender, received: timestamp ?? (channel === 'messenger-mock' ? now : 0),
-  })))
+  for (const event of events) {
+    if (channel==='messenger' && (!event.timestamp || event.timestamp<now-86400000 || event.timestamp>now+300000)) continue
+    if (!firstById.has(event.id)) firstById.set(event.id, event)
+  }
+  const input = JSON.stringify(await Promise.all([...firstById.values()].map(async ({ id, sender, text, timestamp }) => ({
+    id, eventHash:await digest(id), sender, text, thread: scope + ':' + sender, received: timestamp===undefined ? (channel === 'messenger-mock' ? now : 0) : Math.min(timestamp,now),
+  }))))
   const accepted = `SELECT CAST(event.key AS INTEGER) seq, event.value payload, d.thread_id
     FROM json_each(?) event JOIN deliveries d ON d.brand_id=? AND d.channel=?
       AND d.external_id=json_extract(event.value,'$.id') AND d.batch_key=?`
   const batchArgs = [input, brand, scope, batch]
   const work = [
-    db.prepare(`INSERT INTO deliveries (brand_id,channel,external_id,at,thread_id,batch_key)
-      SELECT ?,?,json_extract(value,'$.id'),?,json_extract(value,'$.thread'),? FROM json_each(?) WHERE EXISTS(SELECT 1 FROM brands WHERE id=? AND active=1)
+    db.prepare(`INSERT INTO deliveries (brand_id,channel,external_id,at,thread_id,batch_key,event_hash)
+      SELECT ?,?,json_extract(value,'$.id'),?,json_extract(value,'$.thread'),?,json_extract(value,'$.eventHash') FROM json_each(?) WHERE EXISTS(SELECT 1 FROM brands WHERE id=? AND active=1)
       AND (? IS NULL OR EXISTS(SELECT 1 FROM channels WHERE brand_id=? AND id=? AND state='connected' AND paused=0 AND mock=? AND (mock=1 OR verified=1)))
       ON CONFLICT DO NOTHING RETURNING external_id`).bind(brand, scope, now, batch, input,brand,connectionId??null,brand,connectionId??null,Number(channel==='messenger-mock')),
     db.prepare(`WITH accepted AS (${accepted}),

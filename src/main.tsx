@@ -100,7 +100,8 @@ function App() {
     if (key==='users') return editable
     if (['settings','integrations'].includes(key)) return editable
     if (key==='conversations') return editable||role==='customer-service'
-    if (key==='training') return training
+    if (['training','persona','agents','models'].includes(key)) return training
+    if (key==='channels') return editable
     if (key==='playground') return role!=='viewer'
     return true
   }

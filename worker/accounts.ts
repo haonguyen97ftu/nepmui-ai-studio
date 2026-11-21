@@ -62,6 +62,30 @@ export async function principal(env: Env, token: string | undefined, demo = fals
     return { id: 'bootstrap', email: '', superAdmin: false, role: 'bootstrap', workspaceId: null, legacy: true }
   }
 }
+// Embed this predicate in a mutation so the authorization check and write share one D1 snapshot.
+export function currentActor(user: Principal, demo: boolean, access: 'session' | 'super-admin' | 'brand-admin' | 'ai-trainer' | 'customer-service' | 'member', workspace?: string) {
+  if (!user.hash) return { sql: demo && !user.legacy ? '1' : '0', bindings: [] }
+  const privileges = {
+    session: '1',
+    'super-admin': 'actor.super_admin=1',
+    'brand-admin': "actor.super_admin=1 OR EXISTS(SELECT 1 FROM memberships m WHERE m.account_id=actor.id AND m.brand_id=actor_session.brand_id AND m.role='brand-admin')",
+    'ai-trainer': "actor.super_admin=1 OR EXISTS(SELECT 1 FROM memberships m WHERE m.account_id=actor.id AND m.brand_id=actor_session.brand_id AND m.role IN ('brand-admin','ai-trainer'))",
+    'customer-service': "actor.super_admin=1 OR EXISTS(SELECT 1 FROM memberships m WHERE m.account_id=actor.id AND m.brand_id=actor_session.brand_id AND m.role IN ('brand-admin','customer-service'))",
+    member: 'actor.super_admin=1 OR EXISTS(SELECT 1 FROM memberships m WHERE m.account_id=actor.id AND m.brand_id=?)',
+  }
+  const bindings: (string | null)[] = [user.hash, user.id]
+  const selectedWorkspace = workspace && access !== 'member'
+    ? 'AND actor_session.brand_id=? AND EXISTS(SELECT 1 FROM brands selected_brand WHERE selected_brand.id=actor_session.brand_id AND selected_brand.active=1)'
+    : ''
+  if (selectedWorkspace) bindings.push(workspace ?? null)
+  if (access === 'member') bindings.push(workspace ?? null)
+  return {
+    sql: `EXISTS(SELECT 1 FROM account_sessions actor_session JOIN accounts actor ON actor.id=actor_session.account_id
+      WHERE actor_session.token_hash=? AND actor.id=? AND actor.active=1 AND actor.auth_version=actor_session.auth_version
+      AND actor_session.expires>unixepoch('subsec')*1000 ${selectedWorkspace} AND (${privileges[access]}))`,
+    bindings,
+  }
+}
 export async function throttle(db: D1Database, secret: string, key: string, max: number) {
   const hmac = await crypto.subtle.importKey('raw',encoder.encode(secret),{ name: 'HMAC', hash: 'SHA-256' },false,['sign'])
   const bucket = hex(new Uint8Array(await crypto.subtle.sign('HMAC',hmac,encoder.encode(key))))
@@ -82,20 +106,4 @@ export async function login(env: Env, email: string, password: string) {
     ? await env.DB.prepare('SELECT id FROM brands WHERE active=1 ORDER BY id=? DESC,id LIMIT 1').bind(legacyWorkspace).first<{ id: string }>()
     : await env.DB.prepare('SELECT b.id FROM brands b JOIN memberships m ON b.id=m.brand_id WHERE m.account_id=? AND b.active=1 ORDER BY b.id LIMIT 1').bind(account.id).first<{ id: string }>()
   return createSession(env.DB,account.id,workspace?.id ?? null,account.auth_version)
-}
-export function allowed(role: Role, path: string, method: string) {
-  if (role==='bootstrap') return false
-  if (role === 'super-admin' || role === 'brand-admin') return true
-  const read = method === 'GET' || method === 'HEAD'
-  const section = path.split('/')[2]
-  if (read) {
-    if (['workspaces','session','overview','knowledge','products','persona','models','agents','channels','analytics'].includes(section)) return true
-    if (section === 'training') return role === 'ai-trainer'
-    if (section === 'conversations') return role === 'customer-service'
-    return false
-  }
-  if (section === 'playground') return role !== 'viewer'
-  if (section === 'conversations') return role === 'customer-service' && method !== 'DELETE'
-  if (['knowledge','training','persona','agents'].includes(section)) return role === 'ai-trainer'
-  return false
 }

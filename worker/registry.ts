@@ -2,7 +2,7 @@ import type { Hono } from 'hono'
 import { z } from 'zod'
 import { contracts } from './contracts'
 import { models } from '../shared/models'
-import { audit } from './accounts'
+import { audit, currentActor } from './accounts'
 import { bodyBytes, jsonBody } from './security'
 import { studio } from './store'
 import type { Env, Variables } from './index'
@@ -35,7 +35,7 @@ export const tokenScope=(connection:Pick<Connection,'brand_id'|'id'|'external_id
 export async function connection(db:D1Database,brand:string,id:string) {
   return db.prepare('SELECT * FROM channels WHERE brand_id=? AND id=?').bind(brand,id).first<Connection>()
 }
-export async function engineStore(db:D1Database,brand:string,channelId?:string,agentId?:string) {
+export async function engineStore(db:D1Database,brand:string,channelId?:string,agentId?:string,authorization?:{sql:string;bindings:(string|null)[]}) {
   const base=studio(db,brand)
   const channel=channelId ? await connection(db,brand,channelId) : undefined
   if (channelId && !channel) throw new RangeError('context_missing')
@@ -45,7 +45,7 @@ export async function engineStore(db:D1Database,brand:string,channelId?:string,a
   const defaults=agent ? agentConfig.parse(JSON.parse(agent.config)) : {}
   const overrides=channel ? agentConfig.parse(JSON.parse(channel.overrides)) : {}
   const persona={ ...await base.setting('persona'),...defaults.persona,...overrides.persona }
-  return studio(db,brand,{ channelId:channel?.id,persona,model:overrides.model??defaults.model })
+  return studio(db,brand,{ channelId:channel?.id,persona,authorization,model:overrides.model??defaults.model })
 }
 export async function verifyPageOwnership(env:Env,registered:Connection,fetcher=fetch) {
   if (registered.mock || registered.kind!=='messenger' || !registered.token_cipher || !/^v\d{1,2}\.0$/.test(env.META_GRAPH_VERSION??'')) return false
@@ -64,13 +64,16 @@ export function registryRoutes(app:Hono<{ Bindings:Env;Variables:Variables }>) {
   app.post('/api/agents',async c=>{
     const input=z.object({ name:z.string().trim().min(1).max(80),config:agentConfig }).parse(await jsonBody(c.req.raw))
     const id=crypto.randomUUID()
-    await c.env.DB.prepare('INSERT INTO agents VALUES (?,?,?,?,1)').bind(c.get('workspaceId'),id,input.name,JSON.stringify(input.config)).run()
-    return c.json({ id },201)
+    const actor=currentActor(c.get('principal')!,c.get('demo'),'ai-trainer',c.get('workspaceId'))
+    const created=await c.env.DB.prepare(`INSERT INTO agents SELECT ?,?,?,?,1 WHERE ${actor.sql} RETURNING id`)
+      .bind(c.get('workspaceId'),id,input.name,JSON.stringify(input.config),...actor.bindings).first()
+    return created ? c.json({ id },201) : c.json({error:'forbidden'},403)
   })
   app.put('/api/agents/:id',async c=>{
     const input=z.object({ name:z.string().trim().min(1).max(80),config:agentConfig,version:z.number().int().positive() }).parse(await jsonBody(c.req.raw))
-    const result=await c.env.DB.prepare('UPDATE agents SET name=?,config=?,version=version+1 WHERE brand_id=? AND id=? AND version=? RETURNING id')
-      .bind(input.name,JSON.stringify(input.config),c.get('workspaceId'),c.req.param('id'),input.version).first()
+    const actor=currentActor(c.get('principal')!,c.get('demo'),'ai-trainer',c.get('workspaceId'))
+    const result=await c.env.DB.prepare(`UPDATE agents SET name=?,config=?,version=version+1 WHERE brand_id=? AND id=? AND version=? AND ${actor.sql} RETURNING id`)
+      .bind(input.name,JSON.stringify(input.config),c.get('workspaceId'),c.req.param('id'),input.version,...actor.bindings).first()
     return result ? c.json({ ok:true }) : c.json({ error:'conflict' },409)
   })
   app.get('/api/channels',async c=>{
@@ -91,9 +94,11 @@ export function registryRoutes(app:Hono<{ Bindings:Env;Variables:Variables }>) {
     if (await c.env.DB.prepare('SELECT 1 FROM channels WHERE kind=? AND external_id=? AND mock=? AND (?=0 OR brand_id=?)').bind(input.kind,input.externalId,Number(input.mock),Number(input.mock),brand).first()) return c.json({ error:'conflict' },409)
     if (input.accessToken && !c.env.CHANNEL_ENCRYPTION_KEY) return c.json({ error:'encryption_unavailable' },409)
     const cipher=input.accessToken ? await encryptToken(c.env.CHANNEL_ENCRYPTION_KEY,input.accessToken,tokenScope({ brand_id:brand,id,external_id:input.externalId })) : null
-    await c.env.DB.prepare('INSERT INTO channels(id,brand_id,kind,external_id,name,state,paused,mock,token_cipher,agent_id,overrides) VALUES (?,?,?,?,?,?,?,?,?,?,?)')
-      .bind(id,brand,input.kind,input.externalId,input.name,input.state,Number(input.paused),Number(input.mock),cipher,input.agentId,JSON.stringify(input.overrides)).run()
-    return c.json({ id },201)
+    const actor=currentActor(c.get('principal')!,c.get('demo'),input.mock ? 'brand-admin' : 'super-admin',brand)
+    const created=await c.env.DB.prepare(`INSERT INTO channels(id,brand_id,kind,external_id,name,state,paused,mock,token_cipher,agent_id,overrides)
+      SELECT ?,?,?,?,?,?,?,?,?,?,? WHERE ${actor.sql} RETURNING id`)
+      .bind(id,brand,input.kind,input.externalId,input.name,input.state,Number(input.paused),Number(input.mock),cipher,input.agentId,JSON.stringify(input.overrides),...actor.bindings).first()
+    return created ? c.json({ id },201) : c.json({error:'forbidden'},403)
   })
   app.put('/api/channels/:id',async c=>{
     const input=channelInput.extend({ version:z.number().int().positive() }).parse(await jsonBody(c.req.raw)),brand=c.get('workspaceId'),id=c.req.param('id')
@@ -106,8 +111,10 @@ export function registryRoutes(app:Hono<{ Bindings:Env;Variables:Variables }>) {
     const cipher=input.state==='disconnected' ? null : input.accessToken ? await encryptToken(c.env.CHANNEL_ENCRYPTION_KEY,input.accessToken,tokenScope(current)) : current.token_cipher
     const verified=input.mock || input.accessToken || current.state!==input.state || !!current.mock!==input.mock ? 0 : current.verified
     if (!input.mock && !input.paused && !verified) return c.json({error:'channel_unverified'},409)
-    const result=await c.env.DB.prepare('UPDATE channels SET name=?,state=?,paused=?,mock=?,token_cipher=?,agent_id=?,overrides=?,verified=?,version=version+1 WHERE brand_id=? AND id=? AND version=? RETURNING id')
-      .bind(input.name,input.state,Number(input.paused),Number(input.mock),cipher,input.agentId,JSON.stringify(input.overrides),verified,brand,id,input.version).first()
+    const actor=currentActor(c.get('principal')!,c.get('demo'),!!current.mock===input.mock ? 'brand-admin' : 'super-admin',brand)
+    const result=await c.env.DB.prepare(`UPDATE channels SET name=?,state=?,paused=?,mock=?,token_cipher=?,agent_id=?,overrides=?,verified=?,version=version+1
+      WHERE brand_id=? AND id=? AND version=? AND ${actor.sql} RETURNING id`)
+      .bind(input.name,input.state,Number(input.paused),Number(input.mock),cipher,input.agentId,JSON.stringify(input.overrides),verified,brand,id,input.version,...actor.bindings).first()
     if (!result) return c.json({ error:'conflict' },409)
     await audit(c.env.DB,c.get('principal')!.id,input.state==='disconnected' ? 'channel.disconnect' : 'channel.update',id,brand)
     return c.json({ ok:true })
@@ -118,8 +125,10 @@ export function registryRoutes(app:Hono<{ Bindings:Env;Variables:Variables }>) {
     if (!registered) return c.json({error:'missing'},404)
     // Verification is a read-only Meta identity request; it never enables ingress or sends messages.
     if (!await verifyPageOwnership(c.env,registered)) return c.json({error:'channel_unverified'},409)
-    const row=await c.env.DB.prepare("UPDATE channels SET verified=1,version=version+1 WHERE brand_id=? AND id=? AND version=? AND state='connected' RETURNING id")
-      .bind(registered.brand_id,registered.id,registered.version).first()
+    const actor=currentActor(c.get('principal')!,c.get('demo'),'super-admin',registered.brand_id)
+    const row=await c.env.DB.prepare(`UPDATE channels SET verified=1,version=version+1
+      WHERE brand_id=? AND id=? AND version=? AND state='connected' AND ${actor.sql} RETURNING id`)
+      .bind(registered.brand_id,registered.id,registered.version,...actor.bindings).first()
     return row ? c.json({ok:true}) : c.json({error:'conflict'},409)
   })
 

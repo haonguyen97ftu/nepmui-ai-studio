@@ -165,7 +165,7 @@ export function Library({ kind, selectedId }: { kind: LibraryKind; selectedId?: 
           const status = 'status' in data ? data.status : data.availability
           return <li className="library-entry" key={item.id}>
             <div className="library-row">
-              {'image' in data && data.image ? <img className="product-image" src={data.image} alt="" loading="lazy" referrerPolicy="no-referrer" /> :
+              {'image' in data && data.image ? <a href={data.image} target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer" className="icon-tile stone" aria-label={`Mở ảnh bên ngoài của ${data.title} (trang mới)`}><Package size={18} /></a> :
                 <span className="icon-tile stone">{kind === 'products' ? <Package size={18} /> : <BookOpen size={18} />}</span>}
               <div className="entry-title"><strong>{data.title}</strong><small>{'category' in data ? data.category + ' · ' : ''}
                 {'price' in data ? number.format(data.price) + ' ₫' : date.format(item.updated)}</small></div>

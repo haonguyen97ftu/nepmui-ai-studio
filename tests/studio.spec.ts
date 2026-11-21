@@ -112,3 +112,17 @@ test('opens linked knowledge versions on desktop and iPhone', async ({ page }, i
   expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBe(0)
   await page.screenshot({ path: `test-results/screenshots/knowledge-${info.project.name}.png`, fullPage: true, animations: 'disabled' })
 })
+
+test('product images require explicit navigation without automatic external requests', async ({ page }) => {
+  const remote = 'https://image-privacy-test.invalid/product.png'
+  let requests = 0
+  await page.route('**/api/products*', route => route.fulfill({ json: { items: [{ id: 'privacy-product', version: 1, updated: Date.now(), data: { title: 'Privacy product', price: 100, notes: '', availability: 'available', image: remote } }], more: false } }))
+  await page.route(remote, route => { requests++; return route.abort() })
+  await page.goto('/#products')
+  const link = page.getByRole('link', { name: 'Mở ảnh bên ngoài của Privacy product (trang mới)' })
+  await expect(link).toBeVisible()
+  await expect(link).toHaveAttribute('href', remote)
+  await expect(link).toHaveAttribute('rel', 'noopener noreferrer')
+  await expect(page.locator(`img[src="${remote}"]`)).toHaveCount(0)
+  expect(requests).toBe(0)
+})

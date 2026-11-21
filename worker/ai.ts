@@ -41,11 +41,17 @@ const overlap = (query: string, title: string) => {
 const policy = /\b(chinh sach|policy|doi tra|hoan tien|refund|return|shipping|giao hang|bao hanh)\b/
 const price = /\b(gia|price|cost|bao nhieu)\b/
 const stock = /\b(ton kho|stock|con hang|het hang|availability)\b/
-const makesCommercialClaim = (value: string) => /[₫$€]|\b(?:\d+(?:[.,]\d+)*\s*(?:k|vnd|dong)|gia ban|gia niem yet|con hang|het hang|ton kho)\b/.test(normalize(value))
+const makesCommercialClaim = (value: string) => /[₫$€]|\b(?:\d+(?:[.,]\d+)*\s*(?:k|vnd|dong)|gia ban|gia niem yet|con hang|het hang|ton kho|prices?|pricing|costs?|availability|in stock|out of stock|sold out)\b/.test(normalize(value))
 const recommend = /\b(goi y|tu van|de xuat|gioi thieu|nen chon|recommend|gift|qua tang|phong ngu|thu gian)\b/
 const followup = /^(con|va|and|what about)\b/
 const suspicious = /\b(ignore (all |previous |prior )?instructions|system prompt|bo qua (chi dan|huong dan|quy tac)|tiet lo (chi dan|bi mat)|developer message|jailbreak)\b/
 const sensitive = /\b(di ung|ngo doc|hoa hoan|chay nha|chan thuong|bong da|bong nang|bi bong|tu tu|chay no|scam|suicide|allerg\w*|poison\w*|refund dispute|injur\w*|credit card|mat khau|the tin dung|password|dia chi cua toi|thong tin ca nhan|so tai khoan|otp)\b/
+
+export function safeSharedText(value: string): string | undefined {
+  const normalized = normalize(value)
+  return sensitive.test(normalized) || suspicious.test(normalized) || redact(value) !== value || redact(normalized) !== normalized
+    ? undefined : value
+}
 
 function selectionSchema(ids: string[], max: number) {
   return { type: 'array', maxItems: Math.min(ids.length, max),
@@ -54,7 +60,9 @@ function selectionSchema(ids: string[], max: number) {
 function requestFor(input: ProviderInput) {
   return {
     messages: [
-      { role: 'system', content: prompt + '\nAdministrator persona: ' + JSON.stringify({ ...input.persona, prompt: redact(input.persona.prompt), voice: redact(input.persona.voice), rules: redact(input.persona.rules) }) },
+      { role: 'system', content: prompt + '\nAdministrator persona: ' + JSON.stringify({ ...input.persona,
+        prompt: safeSharedText(input.persona.prompt) ?? '', voice: safeSharedText(input.persona.voice) ?? '',
+        rules: safeSharedText(input.persona.rules) ?? '' }) },
       { role: 'user', content: JSON.stringify({
         question: input.question, history: input.history,
         instruction: 'Use the latest question. Resolve short follow-ups from history, but all facts and IDs must come from the current lists. Prefer concise Vietnamese; do not repeat a preference question when the customer already specified notes.',
@@ -103,14 +111,14 @@ function budget(request: ReturnType<typeof requestFor>) {
   return Math.ceil((inputCeiling * 26668 + maxOutput * 204805) / 1_000_000)
 }
 
-function render(plan: Plan, sources: Source[], products: Product[], consult: boolean, language: 'vi' | 'en', focus: 'price' | 'stock' | 'summary', name: string) {
+function render(plan: Plan, sources: Source[], products: Product[], consult: boolean, language: 'vi' | 'en', focus: 'price' | 'stock' | 'commercial' | 'summary', name: string) {
   const en = language === 'en'
   const lead = plan.tone === 'concise' ? '' : plan.tone === 'warm'
     ? en ? 'Happy to help.' : `Dạ, ${name} rất vui được hỗ trợ bạn.`
     : en ? 'Here’s what may help.' : 'Bạn có thể tham khảo những thông tin sau.'
   const lines = products.map(product => {
     const amount = new Intl.NumberFormat(en ? 'en-US' : 'vi-VN').format(product.price) + ' ₫'
-    const notes = product.notes && !makesCommercialClaim(product.notes) && !policy.test(normalize(product.notes)) ? product.notes : ''
+    const notes = focus === 'summary' ? product.notes : ''
     const availability = product.availability === 'available' ? en ? 'in stock' : 'còn hàng'
       : product.availability === 'unavailable' ? en ? 'out of stock' : 'hết hàng'
       : en ? 'availability unconfirmed' : 'chưa xác nhận tồn kho'
@@ -142,8 +150,10 @@ export async function answer(store: Studio, ai: Inference | undefined, question:
   })
   if (typeof store.brand==='function' && !brand) return finish('workspace_inactive')
   const normalized = normalize(question)
-  if (sensitive.test(normalized) || suspicious.test(normalized) || redact(question) !== question) return finish('sensitive')
-  const messages: Message[] = history.map(item => typeof item === 'string' ? { role: 'user', text: item } : item)
+  if (safeSharedText(question) === undefined) return finish('sensitive')
+  const turns: Message[] = history.map(item => typeof item === 'string' ? { role: 'user', text: item } : item)
+  const messages = turns.filter((message, index) => message.role !== 'human' && message.reason !== 'sensitive' &&
+    !(message.role === 'user' && turns[index + 1]?.reason === 'sensitive') && safeSharedText(message.text) !== undefined)
   const lastQuestion = messages.findLast(message => message.role === 'user')?.text ?? ''
   const recentRefs = messages.findLast(message => message.role === 'assistant')?.sources?.filter(ref => ref.kind === 'products') ?? []
   const useContext = followup.test(normalized) || /^(gia|con hang|het hang|tang huong|ton kho|price|cost|stock|availability|bao nhieu|loai do|mau do|san pham do)\b/.test(normalized)
@@ -173,7 +183,7 @@ export async function answer(store: Studio, ai: Inference | undefined, question:
     ])
     const productRows = contextProduct ? [contextProduct] : retrievedProducts
     sources = knowledgeRows.filter(({ data }) => {
-      if (suspicious.test(normalize(data.body)) || redact(data.body) !== data.body || makesCommercialClaim(data.body)) return false
+      if (safeSharedText(data.body) === undefined || safeSharedText(data.title) === undefined || makesCommercialClaim(data.body)) return false
       if (asksPolicy) {
         const policyTerms = tokens(question).filter(word => !['chinh','sach','policy','mo','phong','the','nao','thu'].includes(word))
         const titleTerms = new Set(tokens(data.title))
@@ -183,16 +193,21 @@ export async function answer(store: Studio, ai: Inference | undefined, question:
       const enough = Math.max(2, Math.ceil(tokens(query).length * 0.62))
       return overlap(query, data.title) >= enough || overlap(query, data.body) >= enough
     }).map(({ id, version, data }) => ({ id, version, kind: 'knowledge' as const, title: data.title, body: data.body })).slice(0, 4)
-    products = productRows.filter(({ data }) => {
-      if (redact(data.notes) !== data.notes || redact(data.title) !== data.title || suspicious.test(normalize(data.notes))) return false
+    const matchingProducts = productRows.filter(({ data }) => {
+      if (safeSharedText(data.title) === undefined || makesCommercialClaim(data.title)) return false
       if (consult) return data.availability === 'available' && (!affinity.length ||
         affinity.some(word => tokens(data.title + ' ' + data.notes).includes(word)))
       return tokens(data.title).length > 0 && overlap(query, data.title) === tokens(data.title).length
-    }).map(({ id, version, data }) => ({ id, version, kind: 'products' as const, ...data })).slice(0, 4)
+    }).map(({ id, version, data }) => ({ id, version, kind: 'products' as const, ...data,
+      notes: safeSharedText(data.notes) !== undefined && !makesCommercialClaim(data.notes) && !policy.test(normalize(data.notes)) && !/\d/.test(data.notes) ? data.notes : '' }))
+    products = matchingProducts
     if (!consult) {
       const explicit = products.filter(product => overlap(question, product.title) === tokens(product.title).length)
       if (explicit.length) products = explicit
     }
+    const productNames = products.map(product => normalize(product.title).trim().replace(/\s+/g, ' '))
+    if (new Set(productNames).size !== productNames.length) { products = []; return finish('no_source') }
+    products = products.slice(0, 4)
     if (products.length && !asksPolicy && !consult) sources = []
     if (consult && !products.length) return finish('no_source')
     if (!sources.length && !products.length) return finish('no_source')
@@ -207,7 +222,7 @@ export async function answer(store: Studio, ai: Inference | undefined, question:
       const facts = catalog.filter(item => !!item)
       const references = [...articles, ...facts].map(({ id, kind, title, version }) => ({ id, kind, title, version }))
       const text = render(preference && plan.closing === 'preferences' ? { ...plan, closing: 'help' } : plan, articles, facts, consult, persona.language, asksCommercial
-        ? price.test(normalized) && stock.test(normalized) ? 'summary' : price.test(normalized) ? 'price' : 'stock'
+        ? price.test(normalized) && stock.test(normalized) ? 'commercial' : price.test(normalized) ? 'price' : 'stock'
         : 'summary', name)
       return finish('grounded', text.slice(0, 4000), references, method)
     }
@@ -222,7 +237,7 @@ export async function answer(store: Studio, ai: Inference | undefined, question:
     diagnostic.maxTokens = maxOutput
     diagnostic.reservedNeurons = budget(request)
     const day = new Date().toISOString().slice(0, 10)
-    if (!await store.reserve(day, config.dailyLimit, config.dailyNeurons, budget(request))) return finish('limit_reached')
+    if (!await store.reserve(day, config.dailyLimit, config.dailyNeurons, diagnostic.reservedNeurons, true)) return finish('limit_reached')
     try {
       const plan = await generate(ai, config.model, request, diagnostic)
       if (plan?.abstain) return finish('no_selection')
@@ -233,8 +248,8 @@ export async function answer(store: Studio, ai: Inference | undefined, question:
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : ''
-      const code = /(?:AiError:|error code[: =]*|code[: =]*)\s*(\d{3,6})\b/i.exec(message)?.[1]
-      if (code) diagnostic.providerCode = Number(code)
+      // Workers AI has historically included this known schema-rejection code in Error.message.
+      if (/^AiError: 3006\b/.test(message)) diagnostic.providerCode = 3006
       diagnostic.schemaKeyword = ['uniqueItems', 'maxItems', 'additionalProperties', 'json_schema', 'response_format']
         .find(keyword => message.includes(keyword))
       diagnostic.code = /JSON Mode couldn't be met/i.test(message) ? 'json_mode_unmet'

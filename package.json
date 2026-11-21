@@ -22,7 +22,9 @@
     "deploy:staging": "node scripts/deploy-staging.mjs",
     "benchmark:staging": "node scripts/benchmark-staging.mjs",
     "migration:report": "node scripts/migration-report.mjs",
-    "backup:staging": "node scripts/backup-staging.mjs"
+    "backup:staging": "node scripts/backup-staging.mjs",
+    "test:authorization": "vitest run tests/authorization-matrix.test.ts",
+    "test:mutation": "node scripts/authorization-mutations.mjs"
   },
   "dependencies": {
     "@fontsource/be-vietnam-pro": "^5.3.0",
