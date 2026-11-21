@@ -112,7 +112,7 @@ describe('D1 AI boundary enforcement', () => {
     const { DB } = await instance.app.getBindings<{ DB: D1Database }>()
     const token = await createSession(DB, service, 'nepmui')
     const thread = await store.create('conversations', {
-      title: privateTurn, channel: 'playground', status: 'handover',
+      title: privateTurn, channel: 'playground', ownerId: service, status: 'handover',
       messages: [{ role: 'user', text: privateTurn }, { role: 'assistant', text: 'Handed over', reason: 'sensitive' }],
     })
     const origin = 'https://ai-security.example.test'

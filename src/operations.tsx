@@ -61,7 +61,7 @@ export function Models() {
     {config.value ? <ModelForm config={config.value} /> : <LoadState error={config.error} retry={config.refresh} />}</>
 }
 
-export function Conversations({ selectedId, correct }: { selectedId?: string; correct: (id: string) => void }) {
+export function Conversations({ selectedId, canDelete, correct }: { selectedId?: string; canDelete: boolean; correct?: (id: string) => void }) {
   const [page, setPage] = useState(0)
   const [pending, setPending] = useState(false)
   const list = useResource<{ items: Entry<'conversations'>[]; more: boolean }>(`conversations?page=${page}${pending ? '&status=handover' : ''}`)
@@ -114,15 +114,15 @@ export function Conversations({ selectedId, correct }: { selectedId?: string; co
             <div className="actions">
               <Button variant="outline" disabled={action.busy} onClick={() => void action.run(async () => {
                 const draft = await api<Entry<'training'>>('conversations/' + encodeURIComponent(item.id) + '/training', 'POST')
-                correct(draft.id)
-              })}>Tạo bản sửa phản hồi <ArrowRight size={15} /></Button>
-              <Button variant="danger" disabled={action.busy} onClick={() => {
+                correct?.(draft.id)
+              }, 'Đã tạo bản nháp huấn luyện.')}>Tạo bản sửa phản hồi <ArrowRight size={15} /></Button>
+              {canDelete && <Button variant="danger" disabled={action.busy} onClick={() => {
                 if (window.confirm('Xóa vĩnh viễn hội thoại và dữ liệu kênh liên quan?')) void action.run(async () => {
                   await api('conversations/' + encodeURIComponent(item.id) + '?version=' + item.version, 'DELETE')
                   window.location.hash = 'conversations'
                   list.refresh()
                 }, 'Đã xóa dữ liệu hội thoại.')
-              }}>Xóa dữ liệu</Button>
+              }}>Xóa dữ liệu</Button>}
             </div>
             <form className="form-stack handover" key={item.version} onSubmit={update}>
               <label>Trạng thái xử lý<select name="status" defaultValue={item.data.status === 'resolved' ? 'resolved' : 'handover'}>

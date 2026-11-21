@@ -42,3 +42,42 @@ it('binds Trainer edit, delete and restore to the exact state version that was v
   }
  }finally{await test.app.dispose()}
 })
+
+it('rejects conversation updates and training from a source changed after validation', async () => {
+ const test = await runtime()
+ try {
+  const env = await test.app.getBindings<Env>(), db = env.DB
+  await db.prepare("INSERT INTO accounts(id,email,name,password_hash,salt,active,super_admin,created) VALUES('race-admin','race-admin@example.test','Synthetic','synthetic','synthetic',1,1,0)").run()
+  const cookie = '__Host-studio=' + await createSession(db, 'race-admin', 'nepmui')
+  const original = stores.studio, base = original(db, 'nepmui')
+  const data = { title: 'Synthetic conversation race', channel: 'playground', status: 'handover', messages: [] } as const
+  for (const method of ['PATCH', 'POST']) {
+   const entry = await base.create('conversations', { ...data, messages: [] })
+   let interleaved = false
+   const spy = vi.spyOn(stores, 'studio').mockImplementation((...args) => {
+    const store = original(...args)
+    const get: typeof store.get = async (kind, id) => {
+     const row = await store.get(kind, id)
+     if (kind === 'conversations' && id === entry.id && !interleaved) {
+      interleaved = true
+      expect(await base.update('conversations', id, { ...data, messages: [], status: 'resolved' }, entry.version)).toBeTruthy()
+     }
+     return row
+    }
+    return { ...store, get }
+   })
+   try {
+    const origin = 'https://race.example.test'
+    const path = '/api/conversations/' + entry.id + (method === 'POST' ? '/training' : '')
+    const response = await http.request(origin + path, {
+     method, headers: { Origin: origin, Cookie: cookie },
+     body: method === 'PATCH' ? JSON.stringify({ status: 'handover', version: entry.version + 1 }) : undefined,
+    }, env)
+    expect(interleaved).toBe(true)
+    expect(response.status).toBe(409)
+    expect(await base.get('conversations', entry.id)).toMatchObject({ version: entry.version + 1, data: { status: 'resolved' } })
+    expect(await base.list('training')).toEqual([])
+   } finally { spy.mockRestore() }
+  }
+ } finally { await test.app.dispose() }
+})

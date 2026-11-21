@@ -10,10 +10,10 @@ type Overview = { total: number; pending: number; responses: number; latency: nu
 type List = { items: Entry<'conversations'>[] }
 const weekdays = new Intl.DateTimeFormat('vi-VN', { weekday: 'short', timeZone: 'UTC' })
 
-export function Dashboard({ demo }: { demo: boolean }) {
+export function Dashboard({ demo, canReadConversations }: { demo: boolean; canReadConversations: boolean }) {
   const [mode, setMode] = useState<'test' | 'live'>(demo ? 'test' : 'live')
   const overview = useResource<Overview>('overview?mode=' + mode)
-  const recent = useResource<List>('conversations?mode=' + mode)
+  const recent = useResource<List>(canReadConversations ? 'conversations?mode=' + mode : '')
   const [days, setDays] = useState(7)
   const data = overview.value
   const points = Array.from({ length: days }, (_, index) => {
@@ -63,13 +63,13 @@ export function Dashboard({ demo }: { demo: boolean }) {
         </section>
       </div>
     </>}
-    <section className="card padded"><div className="card-heading"><div><h2>Hội thoại gần đây</h2><p>Xem câu hỏi mới và các trường hợp cần hỗ trợ</p></div>
+    {canReadConversations && <section className="card padded"><div className="card-heading"><div><h2>Hội thoại gần đây</h2><p>Xem câu hỏi mới và các trường hợp cần hỗ trợ</p></div>
       <Button variant="ghost" asChild><a href="#conversations">Xem tất cả <ArrowRight size={16} /></a></Button></div>
       {!recent.value ? <LoadState retry={recent.refresh} error={recent.error} /> : recent.value.items.length ?
         <ul className="entries">{recent.value.items.slice(0, 5).map(item => <li key={item.id}>
           <a className="entry-link" href={`#conversations/${encodeURIComponent(item.id)}`}><span className="icon-tile stone"><MessageCircle size={16} /></span>
             <span className="entry-title"><strong>{item.data.title}</strong><small>{date.format(item.updated)}</small></span><Badge value={item.data.status} />
           </a></li>)}</ul> : <Empty title="Chưa có hội thoại">Gửi một tin nhắn trong phòng thử nghiệm để bắt đầu.</Empty>}
-    </section>
+    </section>}
   </>
 }

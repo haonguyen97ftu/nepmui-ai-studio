@@ -2,12 +2,21 @@ import { and, desc, eq, sql } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/d1'
 import { brands, records, revisions } from './schema'
 import { settings, type Data, type Entry, type Kind, type SourceRef } from './contracts'
+import type { Principal } from './accounts'
 import { matchExpression, retrievalExpression } from './retrieval'
 
-export function studio(binding: D1Database, brand: string, context: { channelId?: string; persona?: Data<'persona'>; model?: Data<'models'>['model']; authorization?: {sql:string;bindings:(string|null)[]} } = {}) {
+export function studio(binding: D1Database, brand: string, context: { channelId?: string; persona?: Data<'persona'>; model?: Data<'models'>['model']; authorization?: {sql:string;bindings:(string|null)[]}; conversationActor?: Pick<Principal, 'id' | 'role'> } = {}) {
   const db = drizzle(binding)
   const authorization=context.authorization
-  const guard=authorization ? sql.join(authorization.sql.split('?').flatMap((part,index)=>index<authorization.bindings.length ? [sql.raw(part),sql`${authorization.bindings[index]}`] : [sql.raw(part)]),sql.raw('')) : undefined
+  const predicate = (condition: { sql: string; bindings: (string | null)[] }) =>
+    sql.join(condition.sql.split('?').flatMap((part, index) => index < condition.bindings.length
+      ? [sql.raw(part), sql`${condition.bindings[index]}`] : [sql.raw(part)]), sql.raw(''))
+  const guard = authorization && predicate(authorization)
+  const actor = context.conversationActor
+  const visibility = actor && actor.role !== 'super-admin' && actor.role !== 'brand-admin'
+    ? { sql: "(json_extract(data,'$.channel') <> 'playground' OR json_extract(data,'$.ownerId') = ?)", bindings: [actor.id] }
+    : { sql: '1', bindings: [] }
+  const visible = (kind: Kind) => kind === 'conversations' ? predicate(visibility) : undefined
   const scope = (kind: Kind) => and(eq(records.brand, brand), eq(records.kind, kind))
   const key = (kind: Kind, id: string) => and(scope(kind), eq(records.id, id))
   const channelScope = (mode?: 'test' | 'live') => {
@@ -18,7 +27,7 @@ export function studio(binding: D1Database, brand: string, context: { channelId?
     id: row.id, data: JSON.parse(row.data), updated: row.updated, version: row.version,
   })
   const get = async <K extends Kind>(kind: K, id: string) => {
-    const row = await db.select().from(records).where(key(kind, id)).get()
+    const row = await db.select().from(records).where(and(key(kind, id), visible(kind))).get()
     return row && decode<K>(row)
   }
   return {
@@ -42,7 +51,7 @@ export function studio(binding: D1Database, brand: string, context: { channelId?
       const match = search && kind === 'knowledge'
         ? terms ? sql`${records.id} IN (SELECT record_id FROM studio_search WHERE studio_search MATCH ${terms} AND brand_id=${brand} AND kind='knowledge')` : sql`0`
         : search ? sql`instr(lower(${records.data}), lower(${search})) > 0` : undefined
-      return (await db.select().from(records).where(and(scope(kind), match, status ? sql`json_extract(${records.data}, '$.status') = ${status}` : undefined, channelScope(mode)))
+      return (await db.select().from(records).where(and(scope(kind), visible(kind), match, status ? sql`json_extract(${records.data}, '$.status') = ${status}` : undefined, channelScope(mode)))
         .orderBy(desc(records.updated), records.id).limit(51).offset(offset)).map(decode<K>)
     },
     async create<K extends Kind>(kind: K, data: Data<K>, id = crypto.randomUUID() as string) {
@@ -51,6 +60,16 @@ export function studio(binding: D1Database, brand: string, context: { channelId?
       if (!row) throw new RangeError('write_conflict')
       return decode<K>(row)
     },
+    async createConversationTraining(source: Pick<Entry<'conversations'>, 'id' | 'version'>, data: Data<'training'>) {
+      const row = await binding.prepare(`INSERT INTO records(brand_id,kind,id,data,updated)
+        SELECT brand_id,'training',?,?,? FROM records
+        WHERE brand_id=? AND kind='conversations' AND id=? AND version=?
+        AND ${visibility.sql} AND ${authorization?.sql ?? '1'}
+        RETURNING brand_id AS brand,kind,id,data,updated,version`)
+        .bind(crypto.randomUUID(), JSON.stringify(data), Date.now(), brand, source.id, source.version,
+          ...visibility.bindings, ...(authorization?.bindings ?? [])).first<typeof records.$inferSelect>()
+      return row && decode<'training'>(row)
+    },
     async importDrafts(items: Data<'knowledge'>[]) {
       const now = Date.now()
       await binding.batch(items.map(item => binding.prepare(`INSERT INTO records (brand_id,kind,id,data,updated) SELECT ?,?,?,?,? WHERE ${authorization?.sql??'1'}`)
@@ -58,7 +77,7 @@ export function studio(binding: D1Database, brand: string, context: { channelId?
     },
     async update<K extends Kind>(kind: K, id: string, data: Data<K>, version: number) {
       const [row] = await db.update(records).set({ data: JSON.stringify(data), version: sql`${records.version}+1`, updated: Date.now() })
-        .where(and(key(kind, id), eq(records.version, version),guard)).returning()
+        .where(and(key(kind, id), eq(records.version, version), visible(kind), guard)).returning()
       return row && decode<K>(row)
     },
     async savePlayground(data: Data<'conversations'>, refs: SourceRef[], previous?: Pick<Entry<'conversations'>, 'id' | 'version'>) {
@@ -82,7 +101,7 @@ export function studio(binding: D1Database, brand: string, context: { channelId?
       return row ? { id: row.id, version: row.version, updated: row.updated, data: JSON.parse(row.data) as Data<'conversations'> } : undefined
     },
     async remove(kind: Kind, id: string, version: number) {
-      return (await db.delete(records).where(and(key(kind, id), eq(records.version, version),guard)).returning()).length > 0
+      return (await db.delete(records).where(and(key(kind, id), eq(records.version, version), visible(kind), guard)).returning()).length > 0
     },
     async publishCorrection(entry: Entry<'training'>) {
       const { id, data, version } = entry
@@ -141,13 +160,13 @@ export function studio(binding: D1Database, brand: string, context: { channelId?
       const [counts, metrics, daily, spend] = await binding.batch<Record<string, number>>([
         binding.prepare(`SELECT count(*) total,
           coalesce(sum(json_extract(data,'$.status')='handover'),0) pending
-          FROM records WHERE brand_id=? AND kind='conversations' AND (json_extract(data,'$.channel') IN ('playground','messenger-mock'))=?`).bind(brand, Number(mode === 'test')),
+          FROM records WHERE brand_id=? AND kind='conversations' AND (json_extract(data,'$.channel') IN ('playground','messenger-mock'))=? AND ${visibility.sql}`).bind(brand, Number(mode === 'test'), ...visibility.bindings),
         binding.prepare(`SELECT count(*) responses, avg(json_extract(message.value,'$.latency')) latency,
           coalesce(sum(json_extract(message.value,'$.reason')='grounded'),0) grounded
           FROM records, json_each(records.data,'$.messages') message WHERE brand_id=? AND kind='conversations'
-          AND json_extract(message.value,'$.role')='assistant' AND (json_extract(records.data,'$.channel') IN ('playground','messenger-mock'))=?`).bind(brand, Number(mode === 'test')),
+          AND json_extract(message.value,'$.role')='assistant' AND (json_extract(records.data,'$.channel') IN ('playground','messenger-mock'))=? AND ${visibility.sql}`).bind(brand, Number(mode === 'test'), ...visibility.bindings),
         binding.prepare(`SELECT date(updated/1000,'unixepoch') day, count(*) total FROM records
-          WHERE brand_id=? AND kind='conversations' AND updated>=? AND (json_extract(data,'$.channel') IN ('playground','messenger-mock'))=? GROUP BY day ORDER BY day`).bind(brand, since, Number(mode === 'test')),
+          WHERE brand_id=? AND kind='conversations' AND updated>=? AND (json_extract(data,'$.channel') IN ('playground','messenger-mock'))=? AND ${visibility.sql} GROUP BY day ORDER BY day`).bind(brand, since, Number(mode === 'test'), ...visibility.bindings),
         binding.prepare('SELECT calls, reserved_neurons FROM usage WHERE brand_id=? AND day=?').bind(brand, day),
       ])
       return { ...counts.results[0], ...metrics.results[0], series: daily.results, calls: spend.results[0]?.calls ?? 0, reservedNeurons: spend.results[0]?.reserved_neurons ?? 0 }

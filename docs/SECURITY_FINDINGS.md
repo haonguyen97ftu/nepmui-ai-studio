@@ -1,6 +1,6 @@
-# NM-AI-04.2 findings register
+# NM-AI-04.3 findings register
 
-Severity: P0 critical; P1 high; P2 medium; P3 low. Baseline `816b3e78baa2b435a3743a397ddd7e633014ab63`. “Remediated in working tree” requires final immutable review and test evidence before closure.
+Severity: P0 critical; P1 high; P2 medium; P3 low. The historical NM-AI-04.2 audit started at `816b3e78baa2b435a3743a397ddd7e633014ab63`. NM-AI-04.3 starts at `93219f551b3494c41280175d8fe82591551e04de`. “Remediated in working tree” requires final immutable review and test evidence before closure.
 
 | ID | Severity | Finding | Status |
 | --- | --- | --- | --- |
@@ -80,3 +80,8 @@ The first immutable review **requested changes**, rather than declaring readines
 ## WEB-03 — P3 — Administrator-configured remote workspace logos
 
 `src/main.tsx:153` and `src/workspaces.tsx:71` still render configured workspace logos as HTTPS images with no-referrer. Unlike product links, these branding images load automatically and reveal viewer IP/user-agent/access timing to the configured host. No server fetch/SSRF was found. Root cause is permitted remote branding, not executable HTML. Verified by source inspection; browser network behavior inferred, not separately exercised. Proposed disposition: restrict branding to approved image hosting or implement explicit external-image consent before a customer rollout; leave this P3 open for product/owner disposition, without claiming all external images are opt-in. No P0/P1 authorization requirement is relaxed. Regression proposal: intercept a synthetic remote logo and assert the chosen future policy. The local candidate retains existing branding behavior.
+
+
+## AUTH-08 — P2 — Conversation management bypassed Playground ownership
+
+The NM-AI-04.2 baseline `93219f551b3494c41280175d8fe82591551e04de` restricted Playground resume. Inbox list, detail, update and training creation still used workspace-only record lookups, and dashboard aggregates included private Playground threads. NM-AI-04.3 shares the conversation visibility predicate across these paths and applies it before pagination and aggregation. Training inserts check the current actor and authorized source version. Deletion retains administrator-only access, workspace scope and optimistic version checking. Verify the remediation against the immutable PR head. WEB-03/P3 remains open.

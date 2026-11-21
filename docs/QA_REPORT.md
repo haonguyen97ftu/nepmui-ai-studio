@@ -136,3 +136,14 @@ No hosted deployment, remote D1 change, real Messenger activation, merge or paid
 Final mutation experiment: 5/5 mutations killed by assertion failures; restored source and normal Worker build passed. A narrower role-only mutation was initially redundant with session-generation fencing and was replaced with removal of the full current-authority predicate; no assertion was relaxed.
 
 Replacement-candidate validation: 582 tests in 11 files passed; 15 browser scenarios passed, 3 existing intentional skips; 5/5 authorization mutations killed; lint/typecheck and both Worker builds passed; migration0003–0005 preservation report passed with zero FK violations. This supersedes first-candidate results.
+
+
+## NM-AI-04.3 conversation ownership and release checks
+
+The prior immutable baseline is `93219f551b3494c41280175d8fe82591551e04de`. The authorization suite covers 65 endpoint method/path policies and synthetic Playground owners, coworkers, Brand and Super Admins, Customer Service and outside-workspace accounts. Resource tests verify list, detail, update and training creation, plus legacy ownerless records, admin deletion, archived workspace read-only behavior, dashboard counts and stable pagination with interleaved hidden records. State-race coverage checks that updates and training creation reject a source changed after validation. The existing redaction test uses an owned synthetic thread so it exercises sanitization after authorization.
+
+Local verification passed with 598 unit and integration tests, including 480 authorization cases. Playwright passed 15 scenarios using the cloud system Chromium, with three existing profile-specific skips. Lockfile installation, lint, typecheck and the Worker build passed. Consult the current PR head for the complete CI run.
+
+The disposable D1 preservation report passed through `0003_platform.sql`, `0004_founder_invariant.sql` and `0005_webhook_replay.sql`. It preserved two records, two revisions and one pending delivery, with identical before/after digest, zero foreign-key violations, preserved search, usage backfill and all three founder guards. The staging deploy helper requires `STUDIO_PLATFORM_MIGRATION_READY=0005_webhook_replay.sql`.
+
+The original 13 benchmark scenarios and two multi-turn checks remain in the benchmark script. Hosted inference, deployment and migration were outside this verification. WEB-03/P3 remains open because browsers automatically fetch configured remote workspace logos.

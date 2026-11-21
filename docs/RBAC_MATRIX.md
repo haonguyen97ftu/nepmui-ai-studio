@@ -20,7 +20,7 @@ Generated from `shared/endpoint-policy.json`. The JSON is the machine-readable p
 | post.accounts.id.revoke | POST | /api/accounts/:id/revoke | super-admin, brand-admin, ai-trainer, customer-service, viewer | global | all; absent, current | self-or-super-admin; current-authority |
 | put.memberships.id | PUT | /api/memberships/:id | super-admin, brand-admin | workspace | all; absent, current | current-authority; scoped-membership |
 | post.account.password | POST | /api/account/password | super-admin, brand-admin, ai-trainer, customer-service, viewer | global | all; absent, current | self; current-password |
-| get.overview | GET | /api/overview | super-admin, brand-admin, ai-trainer, customer-service, viewer | workspace | all; absent, current |  |
+| get.overview | GET | /api/overview | super-admin, brand-admin, ai-trainer, customer-service, viewer | workspace | all; absent, current | authorized-selected-workspace; conversation-visibility-before-aggregation; non-playground-role-access; playground-owner-or-workspace-admin; legacy-ownerless-playground-admin-only |
 | get.analytics | GET | /api/analytics | super-admin, brand-admin, ai-trainer, customer-service, viewer | workspace | all; absent, current |  |
 | get.audit | GET | /api/audit | super-admin, brand-admin | workspace | all; absent, current |  |
 | patch.brand | PATCH | /api/brand | super-admin, brand-admin | workspace | all; absent, current |  |
@@ -47,13 +47,13 @@ Generated from `shared/endpoint-policy.json`. The JSON is the machine-readable p
 | put.persona | PUT | /api/persona | super-admin, brand-admin, ai-trainer | workspace | all; absent, current |  |
 | get.models | GET | /api/models | super-admin, brand-admin, ai-trainer | workspace | all; absent, current |  |
 | put.models | PUT | /api/models | super-admin, brand-admin | workspace | all; absent, current |  |
-| post.playground | POST | /api/playground | super-admin, brand-admin, ai-trainer, customer-service | workspace | all; absent, current |  |
-| get.conversations | GET | /api/conversations | super-admin, brand-admin, customer-service | workspace | all; absent, current |  |
-| get.conversations.detail-empty | GET | /api/conversations/detail-empty | super-admin, brand-admin, customer-service | workspace | all; absent, current |  |
-| get.conversations.id | GET | /api/conversations/:id | super-admin, brand-admin, customer-service | workspace | all; absent, current |  |
-| patch.conversations.id | PATCH | /api/conversations/:id | super-admin, brand-admin, customer-service | workspace | all; absent, current |  |
-| delete.conversations.id | DELETE | /api/conversations/:id | super-admin, brand-admin | workspace | all; absent, current |  |
-| post.conversations.id.training | POST | /api/conversations/:id/training | super-admin, brand-admin, customer-service | workspace | all; absent, current |  |
+| post.playground | POST | /api/playground | super-admin, brand-admin, ai-trainer, customer-service | workspace | active; absent, current | authorized-selected-workspace; active-workspace; new-thread-owned-by-actor; playground-resume-owner-or-workspace-admin; legacy-ownerless-playground-admin-only; same-playground-channel; current-source-version-on-resume |
+| get.conversations | GET | /api/conversations | super-admin, brand-admin, customer-service | workspace | all; absent, current | authorized-selected-workspace; conversation-visibility-before-pagination; non-playground-role-access; playground-owner-or-workspace-admin; legacy-ownerless-playground-admin-only |
+| get.conversations.detail-empty | GET | /api/conversations/detail-empty | super-admin, brand-admin, customer-service | workspace | all; absent, current | authorized-selected-workspace; empty-placeholder-no-record-access |
+| get.conversations.id | GET | /api/conversations/:id | super-admin, brand-admin, customer-service | workspace | all; absent, current | authorized-selected-workspace; current-conversation; delivery-metadata-scoped-to-visible-conversation; non-playground-role-access; playground-owner-or-workspace-admin; legacy-ownerless-playground-admin-only |
+| patch.conversations.id | PATCH | /api/conversations/:id | super-admin, brand-admin, customer-service | workspace | active; absent, current | authorized-selected-workspace; active-workspace; current-conversation; current-version; preserve-type-and-owner; non-playground-role-access; playground-owner-or-workspace-admin; legacy-ownerless-playground-admin-only |
+| delete.conversations.id | DELETE | /api/conversations/:id | super-admin, brand-admin | workspace | active; absent, current | authorized-selected-workspace; active-workspace; workspace-admin-only; current-conversation; current-version |
+| post.conversations.id.training | POST | /api/conversations/:id/training | super-admin, brand-admin, customer-service | workspace | active; absent, current | authorized-selected-workspace; active-workspace; visible-source-conversation; current-source-version; redacted-training-draft-only; non-playground-role-access; playground-owner-or-workspace-admin; legacy-ownerless-playground-admin-only |
 | get.privacy | GET | /api/privacy | super-admin, brand-admin | workspace | all; absent, current |  |
 | put.privacy | PUT | /api/privacy | super-admin, brand-admin | workspace | all; absent, current |  |
 | post.privacy.purge | POST | /api/privacy/purge | super-admin, brand-admin | workspace | all; absent, current |  |
@@ -73,3 +73,11 @@ Generated from `shared/endpoint-policy.json`. The JSON is the machine-readable p
 Viewer knowledge access is published-only and revision history is denied. Viewer and Customer Service cannot read persona/models/agents/channels; AI Trainer may read persona/models/agents and cannot read channels. Server enforcement and generated regression results must be checked on the final immutable candidate.
 
 Verification includes 65 routes × seven principals (455 baseline combinations) plus state and object constraints. Gate allow tests demonstrate policy admission, while real denial tests prove rejected requests do not reach protected handlers. They do not establish exhaustive allowed-handler behavior. Final immutable SHA and final command evidence remain pending.
+
+## Conversation records
+
+The server resolves the selected workspace from a current account session and membership. Platform Super Admins use their existing workspace access. Brand Admins administer their own workspaces. Archived workspaces permit reads and block changes.
+
+The inbox admits Super Admins, Brand Admins and Customer Service. Within that workspace, Playground records are visible to their owner among admitted roles and to administrators. Legacy ownerless Playground records are visible only to administrators. Customer Service retains access to non-Playground customer threads. AI Trainers can resume their own Playground threads through the Playground endpoint. Search, mode, status, pagination and dashboard aggregates apply conversation visibility in SQL.
+
+A missing or hidden thread returns 404 for detail, update and training creation. Updates preserve type, owner and prior messages within the existing transcript limit. Updates and deletions require the current version. Only administrators can delete. Training creation rechecks actor access and the source version in the insert statement and produces a redacted draft.

@@ -126,3 +126,127 @@ it('does not let a Brand Admin import an account from another tenant by known ID
  expect((await request('/api/memberships/foreign-user','PUT','brand-admin',{role:'brand-admin'})).status).toBe(403)
  expect(await env.DB.prepare("SELECT 1 FROM memberships WHERE account_id='foreign-user' AND brand_id='nepmui'").first()).toBeNull()
 })
+
+describe('conversation ownership across inbox operations', () => {
+ const base = '/api/conversations'
+ const owner = 'customer-service'
+ const coworker = 'conversation-coworker'
+ const outsider = 'conversation-outsider'
+ const sample = { title: 'Synthetic conversation', status: 'handover', messages: [
+  { role: 'user', text: 'Synthetic customer question' },
+  { role: 'assistant', text: 'Synthetic assistant answer', reason: 'grounded', latency: 5 },
+ ] } as const
+
+ beforeAll(async () => {
+  for (const [id, brand] of [[coworker, workspace], [outsider, 'matrix-two']]) {
+   await env.DB.prepare('INSERT INTO accounts(id,email,name,password_hash,salt,active,super_admin,created) VALUES(?,?,?,?,?,1,0,?)')
+    .bind(id, id + '@example.test', id, 'synthetic', 'synthetic', Date.now()).run()
+   await env.DB.prepare("INSERT INTO memberships(account_id,brand_id,role) VALUES(?,?,'customer-service')").bind(id, brand).run()
+   cookies.set(id, '__Host-studio=' + await createSession(env.DB, id, brand))
+  }
+  const store = studio(env.DB, workspace)
+  const thread = { ...sample, messages: [...sample.messages] }
+  await store.create('conversations', { ...thread, channel: 'playground', ownerId: 'matrix-customer-service' }, 'owned-playground')
+  await store.create('conversations', { ...thread, channel: 'playground' }, 'legacy-playground')
+  await store.create('conversations', { ...thread, channel: 'messenger' }, 'customer-thread')
+  await studio(env.DB, 'matrix-two').create('conversations', { ...thread, channel: 'messenger' }, 'foreign-thread')
+ })
+
+ const cases = [
+  [owner, 'owned-playground', true],
+  [coworker, 'owned-playground', false],
+  ['brand-admin', 'owned-playground', true],
+  ['super-admin', 'owned-playground', true],
+  [outsider, 'owned-playground', false],
+  [owner, 'legacy-playground', false],
+  ['brand-admin', 'legacy-playground', true],
+  [coworker, 'customer-thread', true],
+  [outsider, 'customer-thread', false],
+  ['brand-admin', 'foreign-thread', false],
+  [outsider, 'foreign-thread', true],
+ ] as const
+
+ it.each(cases)('%s visibility and operations on %s (allowed: %s)', async (role, id, allowed) => {
+  const list = await request(base + '?q=Synthetic conversation', 'GET', role)
+  expect(list.status).toBe(200)
+  expect((await list.json() as { items: { id: string }[] }).items.some(item => item.id === id)).toBe(allowed)
+  const detail = await request(base + '/' + id, 'GET', role)
+  expect(detail.status).toBe(allowed ? 200 : 404)
+  const before = allowed ? (await detail.json() as { item: { version: number; data: { ownerId?: string; messages: unknown[] } } }).item : undefined
+  const patched = await request(base + '/' + id, 'PATCH', role, { status: 'handover', reply: 'Synthetic internal note', version: before?.version ?? 1 })
+  expect(patched.status).toBe(allowed ? 200 : 404)
+  if (before) {
+   const saved = await patched.json() as typeof before
+   expect(saved.data.ownerId).toBe(before.data.ownerId)
+   expect(saved).toMatchObject({ version: before.version + 1, data: {
+    messages: [...before.data.messages, { role: 'human', text: 'Synthetic internal note' }],
+   } })
+   expect((await request(base + '/' + id, 'PATCH', role, { status: 'resolved', version: before.version })).status).toBe(409)
+  }
+  const count = () => env.DB.prepare("SELECT count(*) AS total FROM records WHERE kind='training'").first('total')
+  const prior = Number(await count())
+  const training = await request(base + '/' + id + '/training', 'POST', role)
+  expect(training.status).toBe(allowed ? 201 : 404)
+  expect(await count()).toBe(prior + Number(allowed))
+  if (allowed) expect(await training.json()).toMatchObject({ data: { title: 'Synthetic customer question', status: 'draft' } })
+ })
+
+ it('counts only visible conversations in dashboard aggregates', async () => {
+  for (const [role, total] of [[owner, 1], [coworker, 0], ['brand-admin', 2], [outsider, 0]] as const) {
+   const result = await request('/api/overview?mode=test', 'GET', role)
+   expect(result.status).toBe(200)
+   const overview = await result.json() as { total: number; pending: number; responses: number; series: { total: number }[] }
+   expect(overview).toMatchObject({ total, pending: total, responses: total })
+   expect(overview.series.reduce((sum, day) => sum + day.total, 0)).toBe(total)
+  }
+ })
+
+ it('filters interleaved hidden threads before search, mode, status and page boundaries', async () => {
+  const entries = Array.from({ length: 51 }, (_, i) => [`visible-${i}`, `hidden-${i}`]).flat()
+  const now = Date.now()
+  await env.DB.batch(entries.map((id, i) => env.DB.prepare("INSERT INTO records(brand_id,kind,id,data,updated) VALUES(?,'conversations',?,?,?)")
+   .bind(workspace, id, JSON.stringify({
+    title: 'Synthetic pagination conversation', channel: 'playground',
+    ownerId: id.startsWith('visible-') ? 'matrix-customer-service' : coworker,
+    status: 'handover', messages: [],
+   }), now - i)))
+  const query = '?q=Synthetic pagination&mode=test&status=handover&page='
+  const expected = entries.filter(id => id.startsWith('visible-'))
+  for (const [page, items, more] of [[0, expected.slice(0, 50), true], [1, expected.slice(50), false], [2, [], false]] as const) {
+   const result = await request(base + query + page, 'GET', owner)
+   expect(result.status).toBe(200)
+   const data = await result.json() as { items: { id: string }[]; more: boolean }
+   expect(data.items.map(item => item.id)).toEqual(items)
+   expect(data.more).toBe(more)
+  }
+  const empty = await request(base + '?q=Synthetic pagination&mode=live', 'GET', owner)
+  expect(await empty.json()).toEqual({ items: [], more: false })
+ })
+
+ it('keeps deletion administrator-only and scoped to the selected workspace', async () => {
+  await studio(env.DB, workspace).create('conversations', {
+   title: 'Synthetic deletion', channel: 'playground', status: 'resolved', messages: [], ownerId: 'matrix-customer-service',
+  }, 'delete-playground')
+  const path = base + '/delete-playground?version=1'
+  expect((await request(path, 'DELETE', owner)).status).toBe(403)
+  expect((await request(base + '/foreign-thread?version=1', 'DELETE', 'brand-admin')).status).toBe(409)
+  expect((await request(path, 'DELETE', 'brand-admin')).status).toBe(200)
+  expect((await request(base + '/delete-playground', 'GET', owner)).status).toBe(404)
+  expect((await request(base + '/delete-playground/training', 'POST', 'brand-admin')).status).toBe(404)
+ })
+})
+
+it('keeps authorized conversation reads available in archived workspaces and blocks writes', async () => {
+ const db = env.DB
+ const store = studio(db, 'matrix-two')
+ const entry = await store.create('conversations', { title: 'Synthetic archived', channel: 'messenger', status: 'handover', messages: [] })
+ const url = '/api/conversations/' + entry.id
+ await db.prepare("UPDATE brands SET active=0 WHERE id='matrix-two'").run()
+ try {
+  expect((await request(url, 'GET', 'conversation-outsider')).status).toBe(200)
+  expect((await request(url, 'PATCH', 'conversation-outsider', { status: 'resolved', version: entry.version })).status).toBe(403)
+  expect((await request(url + '/training', 'POST', 'conversation-outsider')).status).toBe(403)
+ } finally {
+  await db.prepare("UPDATE brands SET active=1 WHERE id='matrix-two'").run()
+ }
+})

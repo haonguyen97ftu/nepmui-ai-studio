@@ -110,13 +110,13 @@ function App() {
 
   const pages = {
     account:<AccountSettings email={user?.email??''} demo={demo} refresh={session.refresh}/>,platform:<PlatformDashboard/>,channels:<Channels editable={editable} superAdmin={superAdmin}/>,users:<Team superAdmin={superAdmin} currentId={user?.id??''}/>,agents:<Agents editable={training}/>,usage:<Usage/>,
-    dashboard: <Dashboard demo={demo} />,
+    dashboard: <Dashboard demo={demo} canReadConversations={canRead('conversations')} />,
     knowledge: <Library key={"knowledge" + (id ?? "")} kind="knowledge" selectedId={id} />,
     products: <Library key={"products" + (id ?? "")} kind="products" selectedId={id} />,
     training: <Library key={"training" + (id ?? "")} kind="training" selectedId={id} />,
     persona: <Persona />,
     playground: <Playground name={name} />,
-    conversations: <Conversations selectedId={id} correct={id => { window.location.hash = 'training/' + encodeURIComponent(id) }} />,
+    conversations: <Conversations canDelete={editable} selectedId={id} correct={training ? id => { window.location.hash = 'training/' + encodeURIComponent(id) } : undefined} />,
     integrations: <Integrations />,
     models: <Models />,
     settings: <Settings name={name} demo={demo} refresh={() => {

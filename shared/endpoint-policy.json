@@ -334,7 +334,13 @@
     ],
     "scope": "workspace",
     "states": "all",
-    "constraints": [],
+    "constraints": [
+      "authorized-selected-workspace",
+      "conversation-visibility-before-aggregation",
+      "non-playground-role-access",
+      "playground-owner-or-workspace-admin",
+      "legacy-ownerless-playground-admin-only"
+    ],
     "resource": "overview",
     "resourceStates": [
       "absent",
@@ -865,8 +871,16 @@
       "customer-service"
     ],
     "scope": "workspace",
-    "states": "all",
-    "constraints": [],
+    "states": "active",
+    "constraints": [
+      "authorized-selected-workspace",
+      "active-workspace",
+      "new-thread-owned-by-actor",
+      "playground-resume-owner-or-workspace-admin",
+      "legacy-ownerless-playground-admin-only",
+      "same-playground-channel",
+      "current-source-version-on-resume"
+    ],
     "resource": "playground",
     "resourceStates": [
       "absent",
@@ -884,7 +898,13 @@
     ],
     "scope": "workspace",
     "states": "all",
-    "constraints": [],
+    "constraints": [
+      "authorized-selected-workspace",
+      "conversation-visibility-before-pagination",
+      "non-playground-role-access",
+      "playground-owner-or-workspace-admin",
+      "legacy-ownerless-playground-admin-only"
+    ],
     "resource": "conversations",
     "resourceStates": [
       "absent",
@@ -902,7 +922,10 @@
     ],
     "scope": "workspace",
     "states": "all",
-    "constraints": [],
+    "constraints": [
+      "authorized-selected-workspace",
+      "empty-placeholder-no-record-access"
+    ],
     "resource": "conversations",
     "resourceStates": [
       "absent",
@@ -920,7 +943,14 @@
     ],
     "scope": "workspace",
     "states": "all",
-    "constraints": [],
+    "constraints": [
+      "authorized-selected-workspace",
+      "current-conversation",
+      "delivery-metadata-scoped-to-visible-conversation",
+      "non-playground-role-access",
+      "playground-owner-or-workspace-admin",
+      "legacy-ownerless-playground-admin-only"
+    ],
     "resource": "conversations",
     "resourceStates": [
       "absent",
@@ -937,8 +967,17 @@
       "customer-service"
     ],
     "scope": "workspace",
-    "states": "all",
-    "constraints": [],
+    "states": "active",
+    "constraints": [
+      "authorized-selected-workspace",
+      "active-workspace",
+      "current-conversation",
+      "current-version",
+      "preserve-type-and-owner",
+      "non-playground-role-access",
+      "playground-owner-or-workspace-admin",
+      "legacy-ownerless-playground-admin-only"
+    ],
     "resource": "conversations",
     "resourceStates": [
       "absent",
@@ -954,8 +993,14 @@
       "brand-admin"
     ],
     "scope": "workspace",
-    "states": "all",
-    "constraints": [],
+    "states": "active",
+    "constraints": [
+      "authorized-selected-workspace",
+      "active-workspace",
+      "workspace-admin-only",
+      "current-conversation",
+      "current-version"
+    ],
     "resource": "conversations",
     "resourceStates": [
       "absent",
@@ -972,8 +1017,17 @@
       "customer-service"
     ],
     "scope": "workspace",
-    "states": "all",
-    "constraints": [],
+    "states": "active",
+    "constraints": [
+      "authorized-selected-workspace",
+      "active-workspace",
+      "visible-source-conversation",
+      "current-source-version",
+      "redacted-training-draft-only",
+      "non-playground-role-access",
+      "playground-owner-or-workspace-admin",
+      "legacy-ownerless-playground-admin-only"
+    ],
     "resource": "conversations",
     "resourceStates": [
       "absent",

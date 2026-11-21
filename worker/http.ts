@@ -55,7 +55,7 @@ export const authorizeRequest=createMiddleware<{Bindings:Env;Variables:Variables
   c.set('principal',user)
   c.set('workspaceId',user?.workspaceId ?? '')
   const access=user?.role==='customer-service' ? 'customer-service' : user?.role==='ai-trainer' ? 'ai-trainer' : 'brand-admin'
-  c.set('store',studio(c.env.DB,user?.workspaceId ?? '',user && !user.legacy ? {authorization:currentActor(user,demo,access,user.workspaceId??undefined)} : {}))
+  c.set('store',studio(c.env.DB,user?.workspaceId ?? '',user && !user.legacy ? {conversationActor:user,authorization:currentActor(user,demo,access,user.workspaceId??undefined)} : {}))
   const publicSession=url.pathname==='/api/session' && ['GET','POST'].includes(c.req.method)
   if (publicSession) return next()
   if (!user) return c.json({ error:'unauthorized' },401)
@@ -245,8 +245,7 @@ app.post('/api/playground', async c => {
   const input = chatInput.parse(await jsonBody(c.req.raw))
   const user = c.get('principal')!
   const previous = input.conversationId ? await c.get('store').get('conversations', input.conversationId) : undefined
-  if (input.conversationId && (previous?.data.channel !== 'playground' || previous.data.channelId !== input.channelId ||
-    (previous.data.ownerId !== user.id && user.role !== 'super-admin' && user.role !== 'brand-admin'))) {
+  if (input.conversationId && (previous?.data.channel !== 'playground' || previous.data.channelId !== input.channelId)) {
     return c.json({ error: 'missing' }, 404)
   }
   const access = previous && previous.data.ownerId !== user.id ? 'brand-admin' :
@@ -283,6 +282,7 @@ app.patch('/api/conversations/:id', async c => {
   const store = c.get('store')
   const existing = await store.get('conversations', c.req.param('id'))
   if (!existing) return c.json({ error: 'missing' }, 404)
+  if (existing.version !== input.version) return c.json({ error: 'conflict' }, 409)
   const { messages } = existing.data
   const reply = input.reply ? [{ role: 'human' as const, text: input.reply }] : []
   const saved = await store.update('conversations', existing.id,
@@ -309,7 +309,8 @@ app.post('/api/conversations/:id/training', async c => {
   const data = contracts.training.parse({ title: (safeTitle ?? '[Thông tin riêng tư đã ẩn]').slice(0, 160),
     incorrect: safeSharedText(last?.text ?? '') ?? '', body: '', status: 'draft',
     sources: last?.sources?.filter(source => safeSharedText(source.title) !== undefined) })
-  return c.json(await store.create('training', data), 201)
+  const draft = await store.createConversationTraining(item, data)
+  return draft ? c.json(draft, 201) : c.json({ error: 'conflict' }, 409)
 })
 app.get('/api/privacy', async c => c.json({ days: await retentionDays(c.env.DB, c.get('workspaceId')) }))
 app.put('/api/privacy', async c => {
