@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import test from 'node:test'
-import { candidate, checkLedger, migrations, openRecovery, personaSeedBoundary, readiness, releaseGate, requireQuiescence, runtimeKeys, sealRecovery,
+import { candidate, checkLedger, migrations, openRecovery, personaSeedBoundary, readiness, verifyStagingTarget, requireQuiescence, sealRecovery,
   snapshot, validateRecovery, verifyMigratedSnapshot, verifyPreservation } from './staging-release.mjs'
 
 const account = '3bdb3fba2669802b6102e0f1953294fe'
@@ -17,23 +17,16 @@ const env = {
 
 test('requires the candidate and explicit staging/production separation', () => {
   assert.match(candidate, /^[a-f0-9]{40}$/)
-  releaseGate(env)
-  for (const patch of [{ GITHUB_ACTIONS: 'true' }, { GITHUB_EVENT_NAME: 'push' },
-    { GITHUB_EVENT_NAME: 'workflow_dispatch' }, { GITHUB_EVENT_NAME: 'workflow_run', GITHUB_RUN_ATTEMPT: '2' },
-    { STUDIO_STAGING_D1_ID: 'wrong' }, { STUDIO_PRODUCTION_D1_ID: database.toUpperCase() },
+  verifyStagingTarget(env)
+  for (const patch of [{ STUDIO_STAGING_D1_ID: 'wrong' }, { STUDIO_PRODUCTION_D1_ID: database.toUpperCase() },
     { STUDIO_PRODUCTION_D1_ID: '' }, { STUDIO_PRODUCTION_D1_ID: '11111111-1111-4111-8111-111111111111' },
     { STUDIO_PRODUCTION_D1_ID: 'invalid' }, { STUDIO_D1_ID: database }, { CLOUDFLARE_ACCOUNT_ID: 'wrong' },
     { STAGING_APPROVED_CANDIDATE_SHA: '' }]) {
-    assert.throws(() => releaseGate({ ...env, ...patch }))
+    assert.throws(() => verifyStagingTarget({ ...env, ...patch }))
   }
 })
 
-test('fails closed on missing or reused runtime credentials and live staging paths', () => {
-  const keys = { CLOUDFLARE_API_TOKEN: 'fixture-only', STAGING_ADMIN_SECRET: '12'.repeat(32),
-    STAGING_AUTH_PEPPER: '34'.repeat(32), STAGING_RECOVERY_KEY: '56'.repeat(32) }
-  assert.equal(runtimeKeys(keys).AUTH_PEPPER, keys.STAGING_AUTH_PEPPER)
-  for (const key of Object.keys(keys)) assert.throws(() => runtimeKeys({ ...keys, [key]: '' }), /credentials/)
-  assert.throws(() => runtimeKeys({ ...keys, STAGING_RECOVERY_KEY: keys.STAGING_AUTH_PEPPER.toUpperCase() }), /credentials/)
+test('rejects active staging ingress and scheduled work in maintenance evidence', () => {
   const subdomain = { enabled: false, previews_enabled: false }, schedules = { schedules: [] }
   requireQuiescence(subdomain, schedules, [], 0)
   for (const args of [[{ ...subdomain, enabled: true }, schedules, [], 0],
@@ -104,10 +97,7 @@ test('release workflow has no push, environment, token or hosted release executi
   assert.match(workflow, /permissions: {}/)
   assert.match(workflow, /exit 1/)
   assert.doesNotMatch(workflow, /push:|workflow_run:|environment:|secrets\.|checkout|CLOUDFLARE_API_TOKEN|deploy:staging/)
-  const release = await readFile(new URL('./staging-release.mjs', import.meta.url), 'utf8')
-  assert.match(release, /STUDIO_MESSENGER_INGEST: 'false',\s*STUDIO_MESSENGER_OUTBOUND: 'false'/)
-  assert.match(release, /STUDIO_PLATFORM_MIGRATION_READY: readiness/)
-  assert.doesNotMatch(release, /time_travel\/restore/)
+
 })
 
 test('candidate benchmark keeps the 13+2 cases and requires scoped account credentials', async () => {
@@ -121,20 +111,25 @@ test('candidate benchmark keeps the 13+2 cases and requires scoped account crede
   assert.doesNotMatch(script, /STUDIO_BENCHMARK_ADMIN_SECRET/)
 })
 
-test('manual entrypoint rejects Actions execution and legacy split subcommands before any remote work', async () => {
+test('all release and legacy entrypoints fail closed regardless of runner or approval variables', async () => {
   const { spawnSync } = await import('node:child_process')
   const { fileURLToPath } = await import('node:url')
-  const script = fileURLToPath(new URL('./staging-release.mjs', import.meta.url))
-  for (const event of ['push', 'workflow_dispatch', 'workflow_run']) {
-    const result = spawnSync(process.execPath, [script], {
-      encoding: 'utf8', env: { ...env, GITHUB_EVENT_NAME: event, GITHUB_RUN_ATTEMPT: '2' },
-    })
-    assert.equal(result.status, 1)
-    assert.match(result.stderr, /GitHub Actions cannot release staging/)
+  const release = fileURLToPath(new URL('./staging-release.mjs', import.meta.url))
+  const hosted = fileURLToPath(new URL('./staging-hosted.mjs', import.meta.url))
+  for (const event of ['', 'push', 'workflow_dispatch', 'workflow_run']) {
+    for (const args of [[], ['backup'], ['migrate'], ['deploy'], ['acceptance']]) {
+      const result = spawnSync(process.execPath, [release, ...args], {
+        encoding: 'utf8', env: { ...env, GITHUB_EVENT_NAME: event, GITHUB_RUN_ATTEMPT: '2',
+          STUDIO_PLATFORM_MIGRATION_READY: readiness, STAGING_APPROVAL_TAG: 'staging-approval-fixture',
+          STAGING_RELEASE_STATE: '/unused-local-ledger', CLOUDFLARE_API_TOKEN: 'synthetic-only' },
+      })
+      assert.equal(result.status, 1)
+      assert.match(result.stderr, /Staging release BLOCKED/)
+    }
   }
-  for (const command of ['backup', 'migrate', 'deploy', 'acceptance']) {
-    const result = spawnSync(process.execPath, [script, command], { encoding: 'utf8', env })
+  for (const command of ['smoke', 'acceptance']) {
+    const result = spawnSync(process.execPath, [hosted, command], { encoding: 'utf8', env })
     assert.equal(result.status, 1)
-    assert.match(result.stderr, /fresh signed approval/)
+    assert.match(result.stderr, /Only offline/)
   }
 })

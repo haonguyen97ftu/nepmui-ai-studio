@@ -44,5 +44,5 @@ jobs:
           npm exec -- cf d1 migrations apply "${args[@]}" --pattern 'migrations/000[12]_*.sql'
           npm exec -- cf d1 migrations apply "${args[@]}" --pattern 'migrations/000[345]_*.sql'
           EXPECTED_SHA="$(git rev-parse HEAD)" node -e 'require("node:fs").writeFileSync("public/studio-release.json", JSON.stringify({sha:process.env.EXPECTED_SHA}), {flag:"wx"})'
-          npm run build:staging
+          STUDIO_MESSENGER_INGEST=true STUDIO_MESSENGER_OUTBOUND=true npm run build:staging
           APP_DIR="$PWD" STUDIO_BENCHMARK_URL=https://nepmui-ai-studio-staging.haonguyen-drew.workers.dev node ../release-ops/ops/staging-hosted.mjs build

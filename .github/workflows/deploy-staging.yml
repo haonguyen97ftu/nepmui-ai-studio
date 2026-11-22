@@ -8,5 +8,5 @@ jobs:
     timeout-minutes: 2
     steps:
       - run: |
-          echo 'GitHub Actions cannot release staging. Follow ops/RELEASE.md from the reviewed operations commit.'
+          echo 'Staging release BLOCKED. See the cloud-only governance decision in ops/RELEASE.md.'
           exit 1
