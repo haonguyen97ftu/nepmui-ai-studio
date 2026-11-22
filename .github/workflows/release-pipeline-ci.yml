@@ -1,0 +1,49 @@
+name: Staging pipeline CI
+on:
+  push:
+    branches: [ops/nm-ai-06-solo-staging]
+    paths:
+      - '.github/workflows/deploy-staging.yml'
+      - '.github/workflows/release-pipeline-ci.yml'
+      - 'ops/**'
+permissions:
+  contents: read
+jobs:
+  offline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          path: release-ops
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
+        with:
+          node-version: 24
+      - id: pin
+        run: node --input-type=module -e 'import {candidate} from "./release-ops/ops/staging-release.mjs"; import {appendFileSync} from "node:fs"; appendFileSync(process.env.GITHUB_OUTPUT, "sha=" + candidate + "\n")'
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: ${{ steps.pin.outputs.sha }}
+          path: candidate
+          persist-credentials: false
+      - name: Verify release gates with synthetic SQLite
+        env:
+          APP_DIR: ${{ github.workspace }}/candidate
+        run: |
+          node --check release-ops/ops/staging-hosted.mjs
+          node --test release-ops/ops/*.test.mjs
+      - name: Exercise the exact migration CLI against disposable D1
+        working-directory: candidate
+        env:
+          STUDIO_STAGING_D1_ID: 11111111-1111-4111-8111-111111111111
+        run: |
+          set -euo pipefail
+          npm ci
+          args=("$STUDIO_STAGING_D1_ID" --mode staging --local --persist-to "$RUNNER_TEMP/pipeline-d1" --dir migrations)
+          npm exec -- cf d1 migrations apply "${args[@]}" --pattern 'migrations/000[12]_*.sql'
+          npm exec -- cf d1 migrations apply "${args[@]}" --pattern 'migrations/000[345]_*.sql'
+          EXPECTED_SHA="$(git rev-parse HEAD)" node -e 'require("node:fs").writeFileSync("public/studio-release.json", JSON.stringify({sha:process.env.EXPECTED_SHA}), {flag:"wx"})'
+          STUDIO_MESSENGER_INGEST=true STUDIO_MESSENGER_OUTBOUND=true npm run build:staging
+          APP_DIR="$PWD" STUDIO_BENCHMARK_URL=https://nepmui-ai-studio-staging.haonguyen-drew.workers.dev node ../release-ops/ops/staging-hosted.mjs build
+          npm exec -- cf deploy --dry-run --prebuilt --mode staging --no-provision

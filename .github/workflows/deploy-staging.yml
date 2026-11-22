@@ -1,0 +1,167 @@
+name: Deploy Studio staging
+on:
+  workflow_dispatch:
+    inputs:
+      phase:
+        description: Release the pinned candidate or run hosted benchmark after account setup
+        type: choice
+        options: [release, benchmark]
+        default: release
+        required: true
+
+permissions:
+  contents: read
+concurrency:
+  group: nepmui-ai-studio-staging
+  cancel-in-progress: false
+env:
+  OPS_DIR: ${{ github.workspace }}/release-ops
+  APP_DIR: ${{ github.workspace }}/candidate
+  CLOUDFLARE_ACCOUNT_ID: 3bdb3fba2669802b6102e0f1953294fe
+  STUDIO_STAGING_D1_ID: 71103118-e36b-4b55-a64d-a8f1d7974903
+  STUDIO_PRODUCTION_D1_ID: ${{ vars.STUDIO_PRODUCTION_D1_ID }}
+  STUDIO_BENCHMARK_URL: https://nepmui-ai-studio-staging.haonguyen-drew.workers.dev
+  TRIGGERING_ACTOR: ${{ github.triggering_actor }}
+  REQUESTED_PHASE: ${{ inputs.phase }}
+  STUDIO_MESSENGER_INGEST: 'false'
+  STUDIO_MESSENGER_OUTBOUND: 'false'
+jobs:
+  build:
+    if: github.repository == 'haonguyen97ftu/nepmui-ai-studio' && github.ref == 'refs/heads/main' && github.actor == 'haonguyen97ftu' && github.triggering_actor == 'haonguyen97ftu' && github.run_attempt == '1'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      candidate: ${{ steps.pin.outputs.sha }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          path: release-ops
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
+        with:
+          node-version: 24
+      - name: Verify Founder dispatch and pinned application CI
+        id: pin
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          node "$OPS_DIR/ops/staging-release.mjs" check
+          node --input-type=module -e 'import {candidate} from "./release-ops/ops/staging-release.mjs"; import {appendFileSync} from "node:fs"; appendFileSync(process.env.GITHUB_OUTPUT, "sha=" + candidate + "\n")'
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: ${{ steps.pin.outputs.sha }}
+          path: candidate
+          persist-credentials: false
+      - name: Build pinned app without deployment secrets
+        if: inputs.phase == 'release'
+        working-directory: candidate
+        env:
+          EXPECTED_SHA: ${{ steps.pin.outputs.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          npm ci
+          node -e 'require("node:fs").writeFileSync("public/studio-release.json", JSON.stringify({sha: process.env.EXPECTED_SHA}), {flag:"wx"})'
+          npm run build:staging
+          node "$OPS_DIR/ops/staging-hosted.mjs" build
+          tar -czf "$RUNNER_TEMP/staging-build.tar.gz" .cloudflare/output
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: inputs.phase == 'release'
+        with:
+          name: staging-build
+          path: ${{ runner.temp }}/staging-build.tar.gz
+          if-no-files-found: error
+          retention-days: 1
+
+  staging:
+    needs: build
+    if: github.repository == 'haonguyen97ftu/nepmui-ai-studio' && github.ref == 'refs/heads/main' && github.actor == 'haonguyen97ftu' && github.triggering_actor == 'haonguyen97ftu' && github.run_attempt == '1'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: nepmui-staging
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          path: release-ops
+          persist-credentials: false
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: ${{ needs.build.outputs.candidate }}
+          path: candidate
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
+        with:
+          node-version: 24
+      - name: Verify checkout and install pinned deploy CLI without credentials
+        if: inputs.phase == 'release'
+        working-directory: candidate
+        env:
+          EXPECTED_SHA: ${{ needs.build.outputs.candidate }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          npm ci --ignore-scripts
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        if: inputs.phase == 'release'
+        with:
+          name: staging-build
+          path: ${{ runner.temp }}/staging-build
+      - name: Unpack and verify the prebuilt artifact
+        if: inputs.phase == 'release'
+        working-directory: candidate
+        run: |
+          set -euo pipefail
+          tar -xzf "$RUNNER_TEMP/staging-build/staging-build.tar.gz"
+          node "$OPS_DIR/ops/staging-hosted.mjs" build
+      - name: Validate protected runtime keys
+        if: inputs.phase == 'release'
+        env:
+          ADMIN_SECRET: ${{ secrets.STAGING_ADMIN_SECRET }}
+          AUTH_PEPPER: ${{ secrets.STAGING_AUTH_PEPPER }}
+          CHANNEL_ENCRYPTION_KEY: ${{ secrets.STAGING_CHANNEL_ENCRYPTION_KEY }}
+          STAGING_RECOVERY_KEY: ${{ secrets.STAGING_RECOVERY_KEY }}
+        run: node "$OPS_DIR/ops/staging-hosted.mjs" secrets
+      - name: Verify staging identity, maintenance and Time Travel point
+        if: inputs.phase == 'release'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          STAGING_RECOVERY_KEY: ${{ secrets.STAGING_RECOVERY_KEY }}
+        run: node "$OPS_DIR/ops/staging-release.mjs" backup
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        id: recovery
+        if: inputs.phase == 'release'
+        with:
+          name: studio-staging-recovery-${{ github.run_id }}
+          path: ${{ runner.temp }}/studio-recovery/recovery.aes256gcm
+          if-no-files-found: error
+          retention-days: 7
+      - name: Apply and verify D1 migrations
+        id: migration
+        if: inputs.phase == 'release'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          STAGING_RECOVERY_KEY: ${{ secrets.STAGING_RECOVERY_KEY }}
+          RECOVERY_ARTIFACT_ID: ${{ steps.recovery.outputs.artifact-id }}
+        run: node "$OPS_DIR/ops/staging-release.mjs" migrate
+      - name: Deploy prebuilt staging Worker
+        if: inputs.phase == 'release'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          STUDIO_PLATFORM_MIGRATION_READY: ${{ steps.migration.outputs.readiness }}
+          STUDIO_STAGING_SECRETS_FILE: ${{ runner.temp }}/studio-runtime-secrets.json
+        run: node "$OPS_DIR/ops/staging-hosted.mjs" deploy
+      - name: Verify exact hosted build and signed-out gates
+        run: node "$OPS_DIR/ops/staging-hosted.mjs" smoke
+      - name: Run account-based 13+2 benchmark
+        if: inputs.phase == 'benchmark'
+        env:
+          STUDIO_BENCHMARK_EMAIL: ${{ secrets.STAGING_BENCHMARK_EMAIL }}
+          STUDIO_BENCHMARK_PASSWORD: ${{ secrets.STAGING_BENCHMARK_PASSWORD }}
+          STUDIO_BENCHMARK_WORKSPACE: ${{ vars.STAGING_BENCHMARK_WORKSPACE }}
+        run: node "$OPS_DIR/ops/staging-hosted.mjs" acceptance
+      - name: Remove private runner files
+        if: always()
+        run: rm -f -- "$RUNNER_TEMP/studio-runtime-secrets.json" "$RUNNER_TEMP/studio-recovery/recovery.aes256gcm"
