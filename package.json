@@ -1,0 +1,63 @@
+{
+  "name": "nepmui-ai-studio",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/haonguyen97ftu/nepmui-ai-studio.git"
+  },
+  "scripts": {
+    "dev": "npm run build:worker && node scripts/preview.mjs",
+    "build": "cf build",
+    "build:worker": "cf build",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:e2e": "playwright test",
+    "build:staging": "cf build --mode staging",
+    "deploy:staging": "node scripts/deploy-staging.mjs",
+    "benchmark:staging": "node scripts/benchmark-staging.mjs",
+    "migration:report": "node scripts/migration-report.mjs",
+    "backup:staging": "node scripts/backup-staging.mjs",
+    "test:authorization": "vitest run tests/authorization-matrix.test.ts",
+    "test:mutation": "node scripts/authorization-mutations.mjs"
+  },
+  "dependencies": {
+    "@fontsource/be-vietnam-pro": "^5.3.0",
+    "@fontsource/lora": "^5.3.0",
+    "@radix-ui/react-slot": "^1.5.0",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "drizzle-orm": "^0.45.4",
+    "hono": "^4.13.19",
+    "lucide-react": "^1.76.0",
+    "papaparse": "^5.7.1",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "tailwind-merge": "^3.7.0",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@cloudflare/vite-plugin": "2.0.0-rc.2",
+    "@cloudflare/workers-types": "^5.20261119.1",
+    "@playwright/test": "^1.65.1",
+    "@tailwindcss/vite": "^4.3.5",
+    "@types/node": "^24.19.2",
+    "@types/papaparse": "^5.5.2",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^5.2.0",
+    "cf": "1.0.0-rc.2",
+    "eslint": "10.15.0",
+    "miniflare": "^5.20261117.0-beta",
+    "tailwindcss": "^4.3.5",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.73.0",
+    "vite": "^7.3.8",
+    "vitest": "5.1.1"
+  }
+}

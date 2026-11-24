@@ -1,0 +1,1300 @@
+[
+  {
+    "id": "get.session",
+    "method": "GET",
+    "path": "/api/session",
+    "roles": [
+      "super-admin",
+      "brand-admin",
+      "ai-trainer",
+      "customer-service",
+      "viewer",
+      "unauthenticated",
+      "bootstrap"
+    ],
+    "scope": "global",
+    "states": "all",
+    "constraints": [],
+    "resource": "session",
+    "resourceStates": [
+      "absent",
+      "current"
+    ]
+  },
+  {
+    "id": "post.session",
+    "method": "POST",
+    "path": "/api/session",
+    "roles": [
+      "super-admin",
+      "brand-admin",
+      "ai-trainer",
+      "customer-service",
+      "viewer",
+      "unauthenticated",
+      "bootstrap"
+    ],
+    "scope": "global",
+    "states": "all",
+    "constraints": [],
+    "resource": "session",
+    "resourceStates": [
+      "absent",
+      "current"
+    ]
+  },
+  {
+    "id": "delete.session",
+    "method": "DELETE",
+    "path": "/api/session",
+    "roles": [
+      "super-admin",
+      "brand-admin",
+      "ai-trainer",
+      "customer-service",
+      "viewer",
+      "bootstrap"
+    ],
+    "scope": "global",
+    "states": "all",
+    "constraints": [],
+    "resource": "session",
+    "resourceStates": [
+      "absent",
+      "current"
+    ]
+  },
+  {
+    "id": "post.bootstrap",
+    "method": "POST",
+    "path": "/api/bootstrap",
+    "roles": [
+      "bootstrap",
+      "super-admin"
+    ],
+    "scope": "global",
+    "states": "all",
+    "constraints": [
+      "empty-account-table",
+      "active-super-admin-first",
+      "legacy-session-current"
+    ],
+    "resource": "bootstrap",
+    "resourceStates": [
+      "absent",
+      "current"
+    ]
+  },
+  {
+    "id": "get.workspaces",
+    "method": "GET",
+    "path": "/api/workspaces",
+    "roles": [
+      "super-admin",
+      "brand-admin",
+      "ai-trainer",
+      "customer-service",
+      "viewer"
+    ],
+    "scope": "global",
+    "states": "all",
+    "constraints": [],
+    "resource": "workspaces",
+    "resourceStates": [
+      "absent",
+      "active",
+      "archived"
+    ]
+  },
+  {
+    "id": "post.workspaces",
+    "method": "POST",
+    "path": "/api/workspaces",
+    "roles": [
+      "super-admin"
+    ],
+    "scope": "global",
+    "states": "all",
+    "constraints": [],
+    "resource": "workspaces",
+    "resourceStates": [
+      "absent",
+      "active",
+      "archived"
+    ]
+  },
+  {
+    "id": "put.workspaces.id",
+    "method": "PUT",
+    "path": "/api/workspaces/:id",
+    "roles": [
+      "super-admin",
+      "brand-admin"
+    ],
+    "scope": "global",
+    "states": "all",
+    "constraints": [
+      "authorized-workspace"
+    ],
+    "resource": "workspaces",
+    "resourceStates": [
+      "absent",
+      "active",
+      "archived"
+    ]
+  },
+  {
+    "id": "post.workspaces.id.switch",
+    "method": "POST",
+    "path": "/api/workspaces/:id/switch",
+    "roles": [
+      "super-admin",
+      "brand-admin",
+      "ai-trainer",
+      "customer-service",
+      "viewer"
+    ],
+    "scope": "global",
+    "states": "all",
+    "constraints": [
+      "current-membership"
+    ],
+    "resource": "workspaces",
+    "resourceStates": [
+      "absent",
+      "active",
+      "archived"
+    ]
+  },
+  {
+    "id": "get.platform",
+    "method": "GET",
+    "path": "/api/platform",
+    "roles": [
+      "super-admin"
+    ],
+    "scope": "global",
+    "states": "all",
+    "constraints": [],
+    "resource": "platform",
+    "resourceStates": [
+      "absent",
+      "current"
+    ]
+  },
+  {
+    "id": "put.platform.limits",
+    "method": "PUT",
+    "path": "/api/platform/limits",
+    "roles": [
+      "super-admin"
+    ],
+    "scope": "global",
+    "states": "all",
+    "constraints": [],
+    "resource": "platform",
+    "resourceStates": [
+      "absent",
+      "current"
+    ]
+  },
+  {
+    "id": "get.accounts",
+    "method": "GET",
+    "path": "/api/accounts",
+    "roles": [
+      "super-admin",
+      "brand-admin"
+    ],
+    "scope": "global",
+    "states": "all",
+    "constraints": [
+      "scoped-directory"
+    ],
+    "resource": "accounts",
+    "resourceStates": [
+      "absent",
+      "current"
+    ]
+  },
+  {
+    "id": "post.accounts",
+    "method": "POST",
+    "path": "/api/accounts",
+    "roles": [
+      "super-admin"
+    ],
+    "scope": "global",
+    "states": "all",
+    "constraints": [
+      "founder-ready",
+      "current-authority"
+    ],
+    "resource": "accounts",
+    "resourceStates": [
+      "absent",
+      "current"
+    ]
+  },
+  {
+    "id": "put.accounts.id",
+    "method": "PUT",
+    "path": "/api/accounts/:id",
+    "roles": [
+      "super-admin"
+    ],
+    "scope": "global",
+    "states": "all",
+    "constraints": [
+      "current-authority",
+      "no-escalation"
+    ],
+    "resource": "accounts",
+    "resourceStates": [
+      "absent",
+      "current"
+    ]
+  },
+  {
+    "id": "post.accounts.id.revoke",
+    "method": "POST",
+    "path": "/api/accounts/:id/revoke",
+    "roles": [
+      "super-admin",
+      "brand-admin",
+      "ai-trainer",
+      "customer-service",
+      "viewer"
+    ],
+    "scope": "global",
+    "states": "all",
+    "constraints": [
+      "self-or-super-admin",
+      "current-authority"
+    ],
+    "resource": "accounts",
+    "resourceStates": [
+      "absent",
+      "current"
+    ]
+  },
+  {
+    "id": "put.memberships.id",
+    "method": "PUT",
+    "path": "/api/memberships/:id",
+    "roles": [
+      "super-admin",
+      "brand-admin"
+    ],
+    "scope": "workspace",
+    "states": "all",
+    "constraints": [
+      "current-authority",
+      "scoped-membership"
+    ],
+    "resource": "memberships",
+    "resourceStates": [
+      "absent",
+      "current"
+    ]
+  },
+  {
+    "id": "post.account.password",
+    "method": "POST",
+    "path": "/api/account/password",
+    "roles": [
+      "super-admin",
+      "brand-admin",
+      "ai-trainer",
+      "customer-service",
+      "viewer"
+    ],
+    "scope": "global",
+    "states": "all",
+    "constraints": [
+      "self",
+      "current-password"
+    ],
+    "resource": "account",
+    "resourceStates": [
+      "absent",
+      "current"
+    ]
+  },
+  {
+    "id": "get.overview",
+    "method": "GET",
+    "path": "/api/overview",
+    "roles": [
+      "super-admin",
+      "brand-admin",
+      "ai-trainer",
+      "customer-service",
+      "viewer"
+    ],
+    "scope": "workspace",
+    "states": "all",
+    "constraints": [
+      "authorized-selected-workspace",
+      "conversation-visibility-before-aggregation",
+      "non-playground-role-access",
+      "playground-owner-or-workspace-admin",
+      "legacy-ownerless-playground-admin-only"
+    ],
+    "resource": "overview",
+    "resourceStates": [
+      "absent",
+      "current"
+    ]
+  },
+  {
+    "id": "get.analytics",
+    "method": "GET",
+    "path": "/api/analytics",
+    "roles": [
+      "super-admin",
+      "brand-admin",
+      "ai-trainer",
+      "customer-service",
+      "viewer"
+    ],
+    "scope": "workspace",
+    "states": "all",
+    "constraints": [],
+    "resource": "analytics",
+    "resourceStates": [
+      "absent",
+      "current"
+    ]
+  },
+  {
+    "id": "get.audit",
+    "method": "GET",
+    "path": "/api/audit",
+    "roles": [
+      "super-admin",
+      "brand-admin"
+    ],
+    "scope": "workspace",
+    "states": "all",
+    "constraints": [],
+    "resource": "audit",
+    "resourceStates": [
+      "absent",
+      "current"
+    ]
+  },
+  {
+    "id": "patch.brand",
+    "method": "PATCH",
+    "path": "/api/brand",
+    "roles": [
+      "super-admin",
+      "brand-admin"
+    ],
+    "scope": "workspace",
+    "states": "all",
+    "constraints": [],
+    "resource": "brand",
+    "resourceStates": [
+      "absent",
+      "current"
+    ]
+  },
+  {
+    "id": "get.knowledge",
+    "method": "GET",
+    "path": "/api/knowledge",
+    "roles": [
+      "super-admin",
+      "brand-admin",
+      "ai-trainer",
+      "customer-service",
+      "viewer"
+    ],
+    "scope": "workspace",
+    "states": "published-only-for-viewer-and-customer-service",
+    "constraints": [],
+    "resource": "knowledge",
+    "resourceStates": [
+      "absent",
+      "deleted",
+      "draft",
+      "approved",
+      "published"
+    ]
+  },
+  {
+    "id": "get.knowledge.id",
+    "method": "GET",
+    "path": "/api/knowledge/:id",
+    "roles": [
+      "super-admin",
+      "brand-admin",
+      "ai-trainer",
+      "customer-service",
+      "viewer"
+    ],
+    "scope": "workspace",
+    "states": "published-only-for-viewer-and-customer-service",
+    "constraints": [],
+    "resource": "knowledge",
+    "resourceStates": [
+      "absent",
+      "deleted",
+      "draft",
+      "approved",
+      "published"
+    ]
+  },
+  {
+    "id": "post.knowledge",
+    "method": "POST",
+    "path": "/api/knowledge",
+    "roles": [
+      "super-admin",
+      "brand-admin",
+      "ai-trainer"
+    ],
+    "scope": "workspace",
+    "states": "trainer-current-and-next-draft-only",
+    "constraints": [],
+    "resource": "knowledge",
+    "resourceStates": [
+      "absent",
+      "deleted",
+      "draft",
+      "approved",
+      "published"
+    ]
+  },
+  {
+    "id": "put.knowledge.id",
+    "method": "PUT",
+    "path": "/api/knowledge/:id",
+    "roles": [
+      "super-admin",
+      "brand-admin",
+      "ai-trainer"
+    ],
+    "scope": "workspace",
+    "states": "trainer-current-and-next-draft-only",
+    "constraints": [],
+    "resource": "knowledge",
+    "resourceStates": [
+      "absent",
+      "deleted",
+      "draft",
+      "approved",
+      "published"
+    ]
+  },
+  {
+    "id": "delete.knowledge.id",
+    "method": "DELETE",
+    "path": "/api/knowledge/:id",
+    "roles": [
+      "super-admin",
+      "brand-admin",
+      "ai-trainer"
+    ],
+    "scope": "workspace",
+    "states": "trainer-current-and-next-draft-only",
+    "constraints": [],
+    "resource": "knowledge",
+    "resourceStates": [
+      "absent",
+      "deleted",
+      "draft",
+      "approved",
+      "published"
+    ]
+  },
+  {
+    "id": "get.products",
+    "method": "GET",
+    "path": "/api/products",
+    "roles": [
+      "super-admin",
+      "brand-admin",
+      "ai-trainer",
+      "customer-service",
+      "viewer"
+    ],
+    "scope": "workspace",
+    "states": "all",
+    "constraints": [],
+    "resource": "products",
+    "resourceStates": [
+      "absent",
+      "current"
+    ]
+  },
+  {
+    "id": "get.products.id",
+    "method": "GET",
+    "path": "/api/products/:id",
+    "roles": [
+      "super-admin",
+      "brand-admin",
+      "ai-trainer",
+      "customer-service",
+      "viewer"
+    ],
+    "scope": "workspace",
+    "states": "all",
+    "constraints": [],
+    "resource": "products",
+    "resourceStates": [
+      "absent",
+      "current"
+    ]
+  },
+  {
+    "id": "post.products",
+    "method": "POST",
+    "path": "/api/products",
+    "roles": [
+      "super-admin",
+      "brand-admin"
+    ],
+    "scope": "workspace",
+    "states": "all",
+    "constraints": [],
+    "resource": "products",
+    "resourceStates": [
+      "absent",
+      "current"
+    ]
+  },
+  {
+    "id": "put.products.id",
+    "method": "PUT",
+    "path": "/api/products/:id",
+    "roles": [
+      "super-admin",
+      "brand-admin"
+    ],
+    "scope": "workspace",
+    "states": "all",
+    "constraints": [],
+    "resource": "products",
+    "resourceStates": [
+      "absent",
+      "current"
+    ]
+  },
+  {
+    "id": "delete.products.id",
+    "method": "DELETE",
+    "path": "/api/products/:id",
+    "roles": [
+      "super-admin",
+      "brand-admin"
+    ],
+    "scope": "workspace",
+    "states": "all",
+    "constraints": [],
+    "resource": "products",
+    "resourceStates": [
+      "absent",
+      "current"
+    ]
+  },
+  {
+    "id": "get.training",
+    "method": "GET",
+    "path": "/api/training",
+    "roles": [
+      "super-admin",
+      "brand-admin",
+      "ai-trainer"
+    ],
+    "scope": "workspace",
+    "states": "all",
+    "constraints": [],
+    "resource": "training",
+    "resourceStates": [
+      "absent",
+      "deleted",
+      "draft",
+      "approved",
+      "published"
+    ]
+  },
+  {
+    "id": "get.training.id",
+    "method": "GET",
+    "path": "/api/training/:id",
+    "roles": [
+      "super-admin",
+      "brand-admin",
+      "ai-trainer"
+    ],
+    "scope": "workspace",
+    "states": "all",
+    "constraints": [],
+    "resource": "training",
+    "resourceStates": [
+      "absent",
+      "deleted",
+      "draft",
+      "approved",
+      "published"
+    ]
+  },
+  {
+    "id": "post.training",
+    "method": "POST",
+    "path": "/api/training",
+    "roles": [
+      "super-admin",
+      "brand-admin",
+      "ai-trainer"
+    ],
+    "scope": "workspace",
+    "states": "trainer-current-and-next-draft-only",
+    "constraints": [],
+    "resource": "training",
+    "resourceStates": [
+      "absent",
+      "deleted",
+      "draft",
+      "approved",
+      "published"
+    ]
+  },
+  {
+    "id": "put.training.id",
+    "method": "PUT",
+    "path": "/api/training/:id",
+    "roles": [
+      "super-admin",
+      "brand-admin",
+      "ai-trainer"
+    ],
+    "scope": "workspace",
+    "states": "trainer-current-and-next-draft-only",
+    "constraints": [],
+    "resource": "training",
+    "resourceStates": [
+      "absent",
+      "deleted",
+      "draft",
+      "approved",
+      "published"
+    ]
+  },
+  {
+    "id": "delete.training.id",
+    "method": "DELETE",
+    "path": "/api/training/:id",
+    "roles": [
+      "super-admin",
+      "brand-admin",
+      "ai-trainer"
+    ],
+    "scope": "workspace",
+    "states": "trainer-current-and-next-draft-only",
+    "constraints": [],
+    "resource": "training",
+    "resourceStates": [
+      "absent",
+      "deleted",
+      "draft",
+      "approved",
+      "published"
+    ]
+  },
+  {
+    "id": "get.knowledge.id.history",
+    "method": "GET",
+    "path": "/api/knowledge/:id/history",
+    "roles": [
+      "super-admin",
+      "brand-admin",
+      "ai-trainer"
+    ],
+    "scope": "workspace",
+    "states": "existing-resource",
+    "constraints": [],
+    "resource": "knowledge",
+    "resourceStates": [
+      "absent",
+      "deleted",
+      "draft",
+      "approved",
+      "published"
+    ]
+  },
+  {
+    "id": "post.knowledge.id.restore",
+    "method": "POST",
+    "path": "/api/knowledge/:id/restore",
+    "roles": [
+      "super-admin",
+      "brand-admin",
+      "ai-trainer"
+    ],
+    "scope": "workspace",
+    "states": "trainer-current-draft-only",
+    "constraints": [],
+    "resource": "knowledge",
+    "resourceStates": [
+      "absent",
+      "deleted",
+      "draft",
+      "approved",
+      "published"
+    ]
+  },
+  {
+    "id": "post.knowledge.import",
+    "method": "POST",
+    "path": "/api/knowledge/import",
+    "roles": [
+      "super-admin",
+      "brand-admin",
+      "ai-trainer"
+    ],
+    "scope": "workspace",
+    "states": "draft-only",
+    "constraints": [],
+    "resource": "knowledge",
+    "resourceStates": [
+      "absent",
+      "deleted",
+      "draft",
+      "approved",
+      "published"
+    ]
+  },
+  {
+    "id": "post.training.id.publish",
+    "method": "POST",
+    "path": "/api/training/:id/publish",
+    "roles": [
+      "super-admin",
+      "brand-admin"
+    ],
+    "scope": "workspace",
+    "states": "approved-only",
+    "constraints": [],
+    "resource": "training",
+    "resourceStates": [
+      "absent",
+      "deleted",
+      "draft",
+      "approved",
+      "published"
+    ]
+  },
+  {
+    "id": "get.persona",
+    "method": "GET",
+    "path": "/api/persona",
+    "roles": [
+      "super-admin",
+      "brand-admin",
+      "ai-trainer"
+    ],
+    "scope": "workspace",
+    "states": "all",
+    "constraints": [],
+    "resource": "persona",
+    "resourceStates": [
+      "absent",
+      "current"
+    ]
+  },
+  {
+    "id": "put.persona",
+    "method": "PUT",
+    "path": "/api/persona",
+    "roles": [
+      "super-admin",
+      "brand-admin",
+      "ai-trainer"
+    ],
+    "scope": "workspace",
+    "states": "all",
+    "constraints": [],
+    "resource": "persona",
+    "resourceStates": [
+      "absent",
+      "current"
+    ]
+  },
+  {
+    "id": "get.models",
+    "method": "GET",
+    "path": "/api/models",
+    "roles": [
+      "super-admin",
+      "brand-admin",
+      "ai-trainer"
+    ],
+    "scope": "workspace",
+    "states": "all",
+    "constraints": [],
+    "resource": "models",
+    "resourceStates": [
+      "absent",
+      "current"
+    ]
+  },
+  {
+    "id": "put.models",
+    "method": "PUT",
+    "path": "/api/models",
+    "roles": [
+      "super-admin",
+      "brand-admin"
+    ],
+    "scope": "workspace",
+    "states": "all",
+    "constraints": [],
+    "resource": "models",
+    "resourceStates": [
+      "absent",
+      "current"
+    ]
+  },
+  {
+    "id": "post.playground",
+    "method": "POST",
+    "path": "/api/playground",
+    "roles": [
+      "super-admin",
+      "brand-admin",
+      "ai-trainer",
+      "customer-service"
+    ],
+    "scope": "workspace",
+    "states": "active",
+    "constraints": [
+      "authorized-selected-workspace",
+      "active-workspace",
+      "new-thread-owned-by-actor",
+      "playground-resume-owner-or-workspace-admin",
+      "legacy-ownerless-playground-admin-only",
+      "same-playground-channel",
+      "current-source-version-on-resume"
+    ],
+    "resource": "playground",
+    "resourceStates": [
+      "absent",
+      "current"
+    ]
+  },
+  {
+    "id": "get.conversations",
+    "method": "GET",
+    "path": "/api/conversations",
+    "roles": [
+      "super-admin",
+      "brand-admin",
+      "customer-service"
+    ],
+    "scope": "workspace",
+    "states": "all",
+    "constraints": [
+      "authorized-selected-workspace",
+      "conversation-visibility-before-pagination",
+      "non-playground-role-access",
+      "playground-owner-or-workspace-admin",
+      "legacy-ownerless-playground-admin-only"
+    ],
+    "resource": "conversations",
+    "resourceStates": [
+      "absent",
+      "current"
+    ]
+  },
+  {
+    "id": "get.conversations.detail-empty",
+    "method": "GET",
+    "path": "/api/conversations/detail-empty",
+    "roles": [
+      "super-admin",
+      "brand-admin",
+      "customer-service"
+    ],
+    "scope": "workspace",
+    "states": "all",
+    "constraints": [
+      "authorized-selected-workspace",
+      "empty-placeholder-no-record-access"
+    ],
+    "resource": "conversations",
+    "resourceStates": [
+      "absent",
+      "current"
+    ]
+  },
+  {
+    "id": "get.conversations.id",
+    "method": "GET",
+    "path": "/api/conversations/:id",
+    "roles": [
+      "super-admin",
+      "brand-admin",
+      "customer-service"
+    ],
+    "scope": "workspace",
+    "states": "all",
+    "constraints": [
+      "authorized-selected-workspace",
+      "current-conversation",
+      "delivery-metadata-scoped-to-visible-conversation",
+      "non-playground-role-access",
+      "playground-owner-or-workspace-admin",
+      "legacy-ownerless-playground-admin-only"
+    ],
+    "resource": "conversations",
+    "resourceStates": [
+      "absent",
+      "current"
+    ]
+  },
+  {
+    "id": "patch.conversations.id",
+    "method": "PATCH",
+    "path": "/api/conversations/:id",
+    "roles": [
+      "super-admin",
+      "brand-admin",
+      "customer-service"
+    ],
+    "scope": "workspace",
+    "states": "active",
+    "constraints": [
+      "authorized-selected-workspace",
+      "active-workspace",
+      "current-conversation",
+      "current-version",
+      "preserve-type-and-owner",
+      "non-playground-role-access",
+      "playground-owner-or-workspace-admin",
+      "legacy-ownerless-playground-admin-only"
+    ],
+    "resource": "conversations",
+    "resourceStates": [
+      "absent",
+      "current"
+    ]
+  },
+  {
+    "id": "delete.conversations.id",
+    "method": "DELETE",
+    "path": "/api/conversations/:id",
+    "roles": [
+      "super-admin",
+      "brand-admin"
+    ],
+    "scope": "workspace",
+    "states": "active",
+    "constraints": [
+      "authorized-selected-workspace",
+      "active-workspace",
+      "workspace-admin-only",
+      "current-conversation",
+      "current-version"
+    ],
+    "resource": "conversations",
+    "resourceStates": [
+      "absent",
+      "current"
+    ]
+  },
+  {
+    "id": "post.conversations.id.training",
+    "method": "POST",
+    "path": "/api/conversations/:id/training",
+    "roles": [
+      "super-admin",
+      "brand-admin",
+      "customer-service"
+    ],
+    "scope": "workspace",
+    "states": "active",
+    "constraints": [
+      "authorized-selected-workspace",
+      "active-workspace",
+      "visible-source-conversation",
+      "current-source-version",
+      "redacted-training-draft-only",
+      "non-playground-role-access",
+      "playground-owner-or-workspace-admin",
+      "legacy-ownerless-playground-admin-only"
+    ],
+    "resource": "conversations",
+    "resourceStates": [
+      "absent",
+      "current"
+    ]
+  },
+  {
+    "id": "get.privacy",
+    "method": "GET",
+    "path": "/api/privacy",
+    "roles": [
+      "super-admin",
+      "brand-admin"
+    ],
+    "scope": "workspace",
+    "states": "all",
+    "constraints": [],
+    "resource": "privacy",
+    "resourceStates": [
+      "absent",
+      "current"
+    ]
+  },
+  {
+    "id": "put.privacy",
+    "method": "PUT",
+    "path": "/api/privacy",
+    "roles": [
+      "super-admin",
+      "brand-admin"
+    ],
+    "scope": "workspace",
+    "states": "all",
+    "constraints": [],
+    "resource": "privacy",
+    "resourceStates": [
+      "absent",
+      "current"
+    ]
+  },
+  {
+    "id": "post.privacy.purge",
+    "method": "POST",
+    "path": "/api/privacy/purge",
+    "roles": [
+      "super-admin",
+      "brand-admin"
+    ],
+    "scope": "workspace",
+    "states": "all",
+    "constraints": [],
+    "resource": "privacy",
+    "resourceStates": [
+      "absent",
+      "current"
+    ]
+  },
+  {
+    "id": "get.integrations",
+    "method": "GET",
+    "path": "/api/integrations",
+    "roles": [
+      "super-admin",
+      "brand-admin"
+    ],
+    "scope": "workspace",
+    "states": "all",
+    "constraints": [],
+    "resource": "integrations",
+    "resourceStates": [
+      "absent",
+      "current"
+    ]
+  },
+  {
+    "id": "post.integrations.messenger.mock",
+    "method": "POST",
+    "path": "/api/integrations/messenger/mock",
+    "roles": [
+      "super-admin",
+      "brand-admin"
+    ],
+    "scope": "workspace",
+    "states": "all",
+    "constraints": [],
+    "resource": "integrations",
+    "resourceStates": [
+      "absent",
+      "current"
+    ]
+  },
+  {
+    "id": "get.agents",
+    "method": "GET",
+    "path": "/api/agents",
+    "roles": [
+      "super-admin",
+      "brand-admin",
+      "ai-trainer"
+    ],
+    "scope": "workspace",
+    "states": "all",
+    "constraints": [],
+    "resource": "agents",
+    "resourceStates": [
+      "absent",
+      "current"
+    ]
+  },
+  {
+    "id": "post.agents",
+    "method": "POST",
+    "path": "/api/agents",
+    "roles": [
+      "super-admin",
+      "brand-admin",
+      "ai-trainer"
+    ],
+    "scope": "workspace",
+    "states": "all",
+    "constraints": [],
+    "resource": "agents",
+    "resourceStates": [
+      "absent",
+      "current"
+    ]
+  },
+  {
+    "id": "put.agents.id",
+    "method": "PUT",
+    "path": "/api/agents/:id",
+    "roles": [
+      "super-admin",
+      "brand-admin",
+      "ai-trainer"
+    ],
+    "scope": "workspace",
+    "states": "all",
+    "constraints": [],
+    "resource": "agents",
+    "resourceStates": [
+      "absent",
+      "current"
+    ]
+  },
+  {
+    "id": "get.channels",
+    "method": "GET",
+    "path": "/api/channels",
+    "roles": [
+      "super-admin",
+      "brand-admin"
+    ],
+    "scope": "workspace",
+    "states": "all",
+    "constraints": [],
+    "resource": "channels",
+    "resourceStates": [
+      "absent",
+      "current"
+    ]
+  },
+  {
+    "id": "post.channels",
+    "method": "POST",
+    "path": "/api/channels",
+    "roles": [
+      "super-admin",
+      "brand-admin"
+    ],
+    "scope": "workspace",
+    "states": "all",
+    "constraints": [],
+    "resource": "channels",
+    "resourceStates": [
+      "absent",
+      "current"
+    ]
+  },
+  {
+    "id": "put.channels.id",
+    "method": "PUT",
+    "path": "/api/channels/:id",
+    "roles": [
+      "super-admin",
+      "brand-admin"
+    ],
+    "scope": "workspace",
+    "states": "all",
+    "constraints": [],
+    "resource": "channels",
+    "resourceStates": [
+      "absent",
+      "current"
+    ]
+  },
+  {
+    "id": "post.channels.id.verify",
+    "method": "POST",
+    "path": "/api/channels/:id/verify",
+    "roles": [
+      "super-admin"
+    ],
+    "scope": "workspace",
+    "states": "all",
+    "constraints": [],
+    "resource": "channels",
+    "resourceStates": [
+      "absent",
+      "current"
+    ]
+  },
+  {
+    "id": "post.channels.id.mock",
+    "method": "POST",
+    "path": "/api/channels/:id/mock",
+    "roles": [
+      "super-admin",
+      "brand-admin"
+    ],
+    "scope": "workspace",
+    "states": "all",
+    "constraints": [],
+    "resource": "channels",
+    "resourceStates": [
+      "absent",
+      "current"
+    ]
+  },
+  {
+    "id": "get.webhooks.messenger",
+    "method": "GET",
+    "path": "/api/webhooks/messenger",
+    "roles": [
+      "unauthenticated"
+    ],
+    "scope": "integration",
+    "states": "all",
+    "constraints": [
+      "staging-disabled",
+      "verify-token",
+      "current-page-binding"
+    ],
+    "resource": "webhooks",
+    "resourceStates": [
+      "absent",
+      "current"
+    ]
+  },
+  {
+    "id": "post.webhooks.messenger",
+    "method": "POST",
+    "path": "/api/webhooks/messenger",
+    "roles": [
+      "unauthenticated"
+    ],
+    "scope": "integration",
+    "states": "all",
+    "constraints": [
+      "staging-disabled",
+      "raw-body-signature",
+      "current-page-binding"
+    ],
+    "resource": "webhooks",
+    "resourceStates": [
+      "absent",
+      "current"
+    ]
+  }
+]

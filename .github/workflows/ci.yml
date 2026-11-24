@@ -1,0 +1,41 @@
+name: Studio CI
+on:
+  pull_request:
+  push:
+    branches: [main, 'feat/**']
+permissions:
+  contents: read
+concurrency:
+  group: studio-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm run build:worker
+      - run: npm test
+      - run: npm run test:authorization
+      - run: npm run test:mutation
+      - run: npm run build:staging
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
+      - run: npm run migration:report
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: studio-browser-results
+          path: |
+            test-results
+            security-results
+            playwright-report
+          if-no-files-found: ignore
+          retention-days: 7
